@@ -1,0 +1,54 @@
+export interface Property {
+  id: string;
+  street_number?: string;
+  street_name?: string;
+  address?: string;
+  suburb?: string;
+  city?: string;
+  postcode?: string;
+  price?: number;
+  sold_price?: number;
+  expected_growth?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  car_garage?: number;
+  square_feet?: number;
+  property_type?: string;
+  category?: string;
+  sale_type?: string;
+  sqm?: number;
+  landsize?: number;
+  listed_date?: string;
+  sale_date?: string;
+  created_at?: string;
+  sold_date?: string;
+  expected_price?: number;
+  commission?: number;
+  agent_name?: string;
+  agency_name?: string;
+  flood_risk?: string;
+  bushfire_risk?: string;
+  contract_status?: string;
+  features?: string[];
+  same_street_sales?: Array<{
+    address: string;
+    sale_price: number;
+    property_type: string;
+    sale_date: string;
+  }>;
+  past_records?: Array<{
+    suburb: string;
+    postcode: string;
+    property_type: string;
+    price: number;
+    bedrooms?: number;
+    bathrooms?: number;
+    car_garage?: number;
+    sqm?: number;
+    landsize?: number;
+    listing_date?: string;
+    sale_date?: string;
+    status?: string;
+    notes?: string;
+  }>;
+}

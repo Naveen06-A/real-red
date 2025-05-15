@@ -1,0 +1,491 @@
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L, { LatLngTuple } from 'leaflet';
+import { motion } from 'framer-motion';
+import { toast } from 'react-toastify';
+import { PropertyDetails } from './Reports';
+
+// Interfaces
+interface NearbyProperties {
+  sold: PropertyDetails[];
+  listed: PropertyDetails[];
+}
+
+interface AgentPropertyMapProps {
+  properties: PropertyDetails[];
+  selectedProperty: PropertyDetails | null;
+  onPropertySelect: (property: PropertyDetails | null) => void;
+}
+
+// Mock coordinates based on suburb
+const getMockCoordinates = (suburb: string): LatLngTuple => {
+  console.log('Getting coordinates for suburb:', suburb);
+  const suburbMap: Record<string, LatLngTuple> = {
+    'pullenvale 4069': [-27.5200, 152.9200],
+    'brookfield 4069': [-27.5000, 152.9000],
+    'anstead 4070': [-27.5400, 152.8600],
+    'chapell hill 4069': [-27.5000, 152.9500],
+    'kenmore 4069': [-27.5100, 152.9300],
+    'kenmore hills 4069': [-27.5050, 152.9400],
+    'fig tree pocket 4069': [-27.5300, 152.9600],
+    'pinjarra hills 4069': [-27.5350, 152.9100],
+    'moggill qld (4070)': [-27.5700, 152.8700],
+    'bellbowrie qld (4070)': [-27.5600, 152.8800],
+    default: [-27.4705, 153.026], // Brisbane default
+  };
+  const normalizedSuburb = suburb.toLowerCase();
+  const coords = suburbMap[normalizedSuburb] || suburbMap.default;
+  console.log('Assigned coordinates:', coords);
+  return coords;
+};
+
+// Custom icons
+const selectedIcon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconSize: [38, 38],
+  iconAnchor: [19, 38],
+  popupAnchor: [0, -38],
+});
+
+const soldIcon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [0, -41],
+});
+
+const listedIcon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [0, -41],
+});
+
+// Simple distance calculation
+const calculateDistance = (point1: LatLngTuple, point2: LatLngTuple): number => {
+  const [lat1, lng1] = point1;
+  const [lat2, lng2] = point2;
+  return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lng2 - lng1, 2));
+};
+
+// Debounce function
+const debounce = (func: (...args: any[]) => void, wait: number) => {
+  let timeout: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+};
+
+// Zoom Controls Component
+function ZoomControls() {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+
+  const handleZoomIn = useCallback(() => {
+    console.log('Zooming in');
+    map.zoomIn();
+    setZoom(map.getZoom() + 1);
+  }, [map]);
+
+  const handleZoomOut = useCallback(() => {
+    console.log('Zooming out');
+    map.zoomOut();
+    setZoom(map.getZoom() - 1);
+  }, [map]);
+
+  return (
+    <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+      <motion.button
+        onClick={handleZoomIn}
+        className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        title="Zoom In"
+      >
+        <svg className="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+        </svg>
+      </motion.button>
+      <motion.button
+        onClick={handleZoomOut}
+        className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        title="Zoom Out"
+      >
+        <svg className="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 12h16" />
+        </svg>
+      </motion.button>
+    </div>
+  );
+}
+
+// Street View Modal Component
+function StreetViewModal({
+  coords,
+  onClose,
+}: {
+  coords: LatLngTuple;
+  onClose: () => void;
+}) {
+  const streetViewUrl = `https://www.google.com/maps/embed?pb=!1m0!3m2!1sen!2sus!4v1!6m8!1m7!1s!2m2!1d${coords[0]}!2d${coords[1]}!3f0!4f0!5f0.7820865974627469`;
+
+  return (
+    <motion.div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[2000]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <div className="bg-white rounded-xl p-4 w-full max-w-3xl">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">Street View</h3>
+          <button onClick={onClose} className="text-gray-600 hover:text-gray-800">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <iframe
+          src={streetViewUrl}
+          width="100%"
+          height="400"
+          style={{ border: 0 }}
+          allowFullScreen
+          loading="lazy"
+        ></iframe>
+      </div>
+    </motion.div>
+  );
+}
+
+export function AgentPropertyMap({ properties, selectedProperty, onPropertySelect }: AgentPropertyMapProps) {
+  const [showStreetView, setShowStreetView] = useState(false);
+  const [streetViewCoords, setStreetViewCoords] = useState<LatLngTuple | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+
+  // Default center (Brisbane, AU)
+  const defaultCenter: LatLngTuple = [-27.4705, 153.026];
+  const center: LatLngTuple = selectedProperty
+    ? [
+        selectedProperty.lat || getMockCoordinates(selectedProperty.suburb)[0],
+        selectedProperty.lng || getMockCoordinates(selectedProperty.suburb)[1],
+      ]
+    : defaultCenter;
+
+  // Log state
+  useEffect(() => {
+    console.log('AgentPropertyMap rendered');
+    console.log('Selected property:', selectedProperty);
+    console.log('Map center:', center);
+    console.log('Total properties:', properties.length);
+  }, [selectedProperty, center, properties]);
+
+  // Debounced property selection
+  const debouncedOnPropertySelect = useCallback(
+    debounce((prop: PropertyDetails | null) => {
+      console.log('Debounced property select:', prop);
+      onPropertySelect(prop);
+    }, 500),
+    [onPropertySelect]
+  );
+
+  // Filter nearby properties
+  const nearbyProperties: NearbyProperties = useMemo(() => {
+    console.log('Calculating nearby properties');
+    if (!selectedProperty) {
+      console.log('No selected property, returning empty');
+      return { sold: [], listed: [] };
+    }
+
+    const maxProperties = 20; // Limit for performance
+    const radiusInDegrees = 1000 / 111000; // 1000m in degrees
+    console.log('Processing up to', maxProperties, 'properties with radius', radiusInDegrees);
+
+    try {
+      const filtered = properties
+        .slice(0, maxProperties)
+        .filter((prop) => {
+          if (prop.id === selectedProperty.id) return false;
+          const propLat = prop.lat || getMockCoordinates(prop.suburb)[0];
+          const propLng = prop.lng || getMockCoordinates(prop.suburb)[1];
+          if (!propLat || !propLng) {
+            console.warn('Property missing coordinates:', prop);
+            return false;
+          }
+          const propPoint: LatLngTuple = [propLat, propLng];
+          const distance = calculateDistance(center, propPoint);
+          const isNearby = distance <= radiusInDegrees;
+          console.log('Property:', prop.id, 'Distance:', distance, 'Nearby:', isNearby);
+          return isNearby;
+        })
+        .reduce(
+          (acc: NearbyProperties, prop) => {
+            const category = prop.category || (prop.sold_price ? 'Sold' : 'Listed');
+            if (category === 'Sold') {
+              acc.sold.push(prop);
+            } else if (category === 'Listed') {
+              acc.listed.push(prop);
+            }
+            return acc;
+          },
+          { sold: [], listed: [] }
+        );
+
+      console.log('Nearby properties:', {
+        sold: filtered.sold.length,
+        listed: filtered.listed.length,
+      });
+      return filtered;
+    } catch (err) {
+      console.error('Error filtering properties:', err);
+      toast.error('Failed to filter nearby properties');
+      return { sold: [], listed: [] };
+    }
+  }, [properties, selectedProperty, center]);
+
+  // Handle empty properties
+  if (!properties.length) {
+    console.log('No properties available');
+    return (
+      <motion.div
+        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        <h3 className="text-xl font-semibold text-gray-800 mb-4">Property Location Map</h3>
+        <p className="text-gray-500">No properties available to display.</p>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div
+      className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 relative"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+    >
+      <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+        <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+          />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        Property Location Map
+      </h3>
+      <div className="mb-4">
+        <select
+          value={selectedProperty?.id || ''}
+          onChange={(e) => {
+            const prop = properties.find((p) => p.id === e.target.value) || null;
+            console.log('Property selected in dropdown:', prop);
+            debouncedOnPropertySelect(prop);
+          }}
+          className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-gray-50"
+          aria-label="Select a property"
+        >
+          <option value="">Select a property</option>
+          {properties.map((prop) => (
+            <option key={prop.id} value={prop.id}>
+              {prop.street_number} {prop.street_name}, {prop.suburb}
+            </option>
+          ))}
+        </select>
+      </div>
+      <MapContainer
+        center={center}
+        zoom={15}
+        style={{ height: '500px', width: '100%' }}
+        className="rounded-lg"
+        ref={mapRef}
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
+        <ZoomControls />
+        {selectedProperty && (
+          <Marker
+            position={center}
+            icon={selectedIcon}
+            eventHandlers={{
+              click: () => {
+                console.log('Opening street view for selected property');
+                setStreetViewCoords(center);
+                setShowStreetView(true);
+              },
+            }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <h4 className="font-semibold">
+                  {selectedProperty.street_number} {selectedProperty.street_name}, {selectedProperty.suburb}
+                </h4>
+                <p>Price: {selectedProperty.price ? formatCurrency(selectedProperty.price) : 'N/A'}</p>
+                <p>Sold Price: {selectedProperty.sold_price ? formatCurrency(selectedProperty.sold_price) : 'N/A'}</p>
+                <p>Type: {selectedProperty.property_type || 'N/A'}</p>
+                <p>Agent: {selectedProperty.agent_name || 'N/A'}</p>
+                <p>Status: {selectedProperty.category || 'N/A'}</p>
+                <button
+                  onClick={() => {
+                    console.log('Opening street view from popup');
+                    setStreetViewCoords(center);
+                    setShowStreetView(true);
+                  }}
+                  className="mt-2 text-blue-600 hover:underline"
+                >
+                  View Street View
+                </button>
+              </div>
+            </Popup>
+          </Marker>
+        )}
+        {nearbyProperties.sold.slice(0, 10).map((prop) => {
+          const coords: LatLngTuple = [
+            prop.lat || getMockCoordinates(prop.suburb)[0],
+            prop.lng || getMockCoordinates(prop.suburb)[1],
+          ];
+          return (
+            <Marker
+              key={prop.id}
+              position={coords}
+              icon={soldIcon}
+              eventHandlers={{
+                click: () => {
+                  console.log('Opening street view for sold property:', prop.id);
+                  setStreetViewCoords(coords);
+                  setShowStreetView(true);
+                },
+              }}
+            >
+              <Popup>
+                <div className="text-sm">
+                  <h4 className="font-semibold">
+                    {prop.street_number} {prop.street_name}, {prop.suburb}
+                  </h4>
+                  <p>Price: {prop.price ? formatCurrency(prop.price) : 'N/A'}</p>
+                  <p>Sold Price: {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}</p>
+                  <p>Type: {prop.property_type || 'N/A'}</p>
+                  <p>Agent: {prop.agent_name || 'N/A'}</p>
+                  <p>Status: {prop.category || 'N/A'}</p>
+                  <button
+                    onClick={() => {
+                      console.log('Opening street view from popup');
+                      setStreetViewCoords(coords);
+                      setShowStreetView(true);
+                    }}
+                    className="mt-2 text-blue-600 hover:underline"
+                  >
+                    View Street View
+                  </button>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+        {nearbyProperties.listed.slice(0, 10).map((prop) => {
+          const coords: LatLngTuple = [
+            prop.lat || getMockCoordinates(prop.suburb)[0],
+            prop.lng || getMockCoordinates(prop.suburb)[1],
+          ];
+          return (
+            <Marker
+              key={prop.id}
+              position={coords}
+              icon={listedIcon}
+              eventHandlers={{
+                click: () => {
+                  console.log('Opening street view for listed property:', prop.id);
+                  setStreetViewCoords(coords);
+                  setShowStreetView(true);
+                },
+              }}
+            >
+              <Popup>
+                <div className="text-sm">
+                  <h4 className="font-semibold">
+                    {prop.street_number} {prop.street_name}, {prop.suburb}
+                  </h4>
+                  <p>Price: {prop.price ? formatCurrency(prop.price) : 'N/A'}</p>
+                  <p>Sold Price: {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}</p>
+                  <p>Type: {prop.property_type || 'N/A'}</p>
+                  <p>Agent: {prop.agent_name || 'N/A'}</p>
+                  <p>Status: {prop.category || 'N/A'}</p>
+                  <button
+                    onClick={() => {
+                      console.log('Opening street view from popup');
+                      setStreetViewCoords(coords);
+                      setShowStreetView(true);
+                    }}
+                    className="mt-2 text-blue-600 hover:underline"
+                  >
+                    View Street View
+                  </button>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
+      {showStreetView && streetViewCoords && (
+        <StreetViewModal
+          coords={streetViewCoords}
+          onClose={() => {
+            console.log('Closing street view');
+            setShowStreetView(false);
+            setStreetViewCoords(null);
+          }}
+        />
+      )}
+      {selectedProperty && (
+        <div className="mt-4">
+          <h4 className="text-lg font-semibold text-gray-800">Nearby Properties</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h5 className="text-md font-medium text-gray-700">Sold Properties ({nearbyProperties.sold.length})</h5>
+              {nearbyProperties.sold.length > 0 ? (
+                <ul className="list-disc pl-5 text-gray-600">
+                  {nearbyProperties.sold.slice(0, 5).map((prop) => (
+                    <li key={prop.id}>
+                      {prop.street_number} {prop.street_name}, {prop.suburb} -{' '}
+                      {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-gray-500">No sold properties nearby.</p>
+              )}
+            </div>
+            <div>
+              <h5 className="text-md font-medium text-gray-700">Listed Properties ({nearbyProperties.listed.length})</h5>
+              {nearbyProperties.listed.length > 0 ? (
+                <ul className="list-disc pl-5 text-gray-600">
+                  {nearbyProperties.listed.slice(0, 5).map((prop) => (
+                    <li key={prop.id}>
+                      {prop.street_number} {prop.street_name}, {prop.suburb} -{' '}
+                      {prop.price ? formatCurrency(prop.price) : 'N/A'}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-gray-500">No listed properties nearby.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// Helper function to format currency
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
