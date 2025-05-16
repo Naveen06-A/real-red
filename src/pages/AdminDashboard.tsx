@@ -13,14 +13,25 @@ interface Agent {
     canRegisterProperties: boolean;
     canEditProperties: boolean;
     canDeleteProperties: boolean;
+    canManageAgents: boolean;
   };
 }
 
+interface ActivityLog {
+  id: string;
+  agent_id: string;
+  action: string;
+  property_id: string;
+  details: any;
+  created_at: string;
+}
+
 export function AdminDashboard() {
-  const { profile } = useAuthStore();
+  const { profile } = useAuthStore() as { profile: Agent | null };
   const [supabaseProperties, setSupabaseProperties] = useState<Property[]>([]);
   const [combinedProperties, setCombinedProperties] = useState<(Property | StaticProperty)[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortConfig, setSortConfig] = useState<{ key: keyof Property | null; direction: 'asc' | 'desc' }>({
     key: null,
@@ -31,14 +42,17 @@ export function AdminDashboard() {
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [newAgent, setNewAgent] = useState({
     email: '',
+    role: 'agent' as 'agent' | 'admin',
     canRegisterProperties: false,
     canEditProperties: false,
     canDeleteProperties: false,
+    canManageAgents: false,
   });
 
   useEffect(() => {
     fetchProperties();
     fetchAgents();
+    fetchActivityLogs();
     setupWebSocket();
   }, []);
 
@@ -56,6 +70,9 @@ export function AdminDashboard() {
           borderRadius: '8px',
         },
       });
+      if (message.type === 'activity_log') {
+        fetchActivityLogs();
+      }
     };
     return () => ws.close();
   };
@@ -85,13 +102,28 @@ export function AdminDashboard() {
       const { data, error } = await supabase
         .from('profiles')
         .select('id, email, role, permissions')
-        .eq('role', 'agent');
+        .in('role', ['agent', 'admin']);
 
       if (error) throw error;
       setAgents(data || []);
     } catch (error) {
       console.error('Error fetching agents:', error);
       toast.error('Failed to fetch agents');
+    }
+  }
+
+  async function fetchActivityLogs() {
+    try {
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .select('id, agent_id, action, property_id, details, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setActivityLogs(data || []);
+    } catch (error) {
+      console.error('Error fetching activity logs:', error);
+      toast.error('Failed to fetch activity logs');
     }
   }
 
@@ -103,6 +135,13 @@ export function AdminDashboard() {
         .eq('id', agentId);
 
       if (error) throw error;
+
+      await supabase.from('activity_logs').insert({
+        agent_id: profile?.id,
+        action: 'update_permissions',
+        details: { agent_id: agentId, updated_permissions: permissions },
+      });
+
       setAgents(agents.map(agent =>
         agent.id === agentId ? { ...agent, permissions } : agent
       ));
@@ -113,13 +152,10 @@ export function AdminDashboard() {
     }
   }
 
-  async function createAgent(e: React.FormEvent) {
+  async function createUser(e: React.FormEvent, role: 'agent' | 'admin') {
     e.preventDefault();
     try {
-      // Generate a temporary password
       const tempPassword = Math.random().toString(36).slice(-8);
-      
-      // Create user in Supabase auth
       const { data: authData, error: authError } = await supabase.auth.admin.createUser({
         email: newAgent.email,
         password: tempPassword,
@@ -128,49 +164,56 @@ export function AdminDashboard() {
 
       if (authError) throw authError;
 
-      // Insert agent profile
+      const permissions = role === 'admin' ? {
+        canRegisterProperties: true,
+        canEditProperties: true,
+        canDeleteProperties: true,
+        canManageAgents: true,
+      } : {
+        canRegisterProperties: newAgent.canRegisterProperties,
+        canEditProperties: newAgent.canEditProperties,
+        canDeleteProperties: newAgent.canDeleteProperties,
+        canManageAgents: false,
+      };
+
       const { error: profileError } = await supabase.from('profiles').insert({
         id: authData.user?.id,
         email: newAgent.email,
-        role: 'agent',
-        permissions: {
-          canRegisterProperties: newAgent.canRegisterProperties,
-          canEditProperties: newAgent.canEditProperties,
-          canDeleteProperties: newAgent.canDeleteProperties,
-        },
+        role,
+        permissions,
       });
 
       if (profileError) throw profileError;
 
-      // Update agents list
+      await supabase.from('activity_logs').insert({
+        agent_id: profile?.id,
+        action: `create_${role}`,
+        details: { email: newAgent.email, permissions },
+      });
+
       setAgents([
         ...agents,
         {
           id: authData.user?.id!,
           email: newAgent.email,
-          role: 'agent',
-          permissions: {
-            canRegisterProperties: newAgent.canRegisterProperties,
-            canEditProperties: newAgent.canEditProperties,
-            canDeleteProperties: newAgent.canDeleteProperties,
-          },
+          role,
+          permissions,
         },
       ]);
 
-      toast.success(`Agent ${newAgent.email} created successfully`);
+      toast.success(`${role.charAt(0).toUpperCase() + role.slice(1)} ${newAgent.email} created successfully`);
       setShowAgentModal(false);
       setNewAgent({
         email: '',
+        role: 'agent',
         canRegisterProperties: false,
         canEditProperties: false,
         canDeleteProperties: false,
+        canManageAgents: false,
       });
-
-      // Optionally, send email with temporary password (requires email service setup)
-      // await sendEmail(newAgent.email, 'Agent Account Created', `Your temporary password is: ${tempPassword}`);
     } catch (error) {
-      console.error('Error creating agent:', error);
-      toast.error('Failed to create agent');
+      console.error(`Error creating ${role}:`, error);
+      toast.error(`Failed to create ${role}`);
     }
   }
 
@@ -182,6 +225,14 @@ export function AdminDashboard() {
         .eq('id', id);
 
       if (error) throw error;
+
+      await supabase.from('activity_logs').insert({
+        agent_id: profile?.id,
+        action: 'delete_property',
+        property_id: id,
+        details: { property_name: combinedProperties.find((p) => p.id === id)?.name },
+      });
+
       setSupabaseProperties(supabaseProperties.filter((property) => property.id !== id));
       setCombinedProperties(combinedProperties.filter((property) => property.id !== id));
       toast.success('Property deleted successfully');
@@ -201,7 +252,7 @@ export function AdminDashboard() {
     setSortConfig({ key, direction });
   };
 
-  if (profile?.role !== 'admin') {
+  if (profile?.role !== 'admin' || !profile?.permissions?.canManageAgents) {
     return (
       <div className="text-center p-8">
         <h2 className="text-2xl font-bold text-red-600">Access Denied</h2>
@@ -271,7 +322,7 @@ export function AdminDashboard() {
             className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
           >
             <UserPlus className="w-5 h-5" />
-            <span>Add New Agent</span>
+            <span>Add New User</span>
           </button>
         </div>
         <div className="overflow-x-auto">
@@ -279,15 +330,18 @@ export function AdminDashboard() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Register</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Edit</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delete</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manage Agents</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {agents.map((agent) => (
                 <tr key={agent.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm text-gray-900">{agent.email}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{agent.role}</td>
                   <td className="px-6 py-4">
                     <input
                       type="checkbox"
@@ -327,6 +381,19 @@ export function AdminDashboard() {
                       className="h-4 w-4 text-blue-600 rounded"
                     />
                   </td>
+                  <td className="px-6 py-4">
+                    <input
+                      type="checkbox"
+                      checked={agent.permissions.canManageAgents}
+                      onChange={(e) =>
+                        updateAgentPermissions(agent.id, {
+                          ...agent.permissions,
+                          canManageAgents: e.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 text-blue-600 rounded"
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -334,12 +401,12 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* New Agent Modal */}
+      {/* New User Modal */}
       {showAgentModal && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Create New Agent</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Create New User</h3>
               <button
                 onClick={() => setShowAgentModal(false)}
                 className="text-gray-500 hover:text-gray-700"
@@ -347,7 +414,7 @@ export function AdminDashboard() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={createAgent}>
+            <form onSubmit={(e) => createUser(e, newAgent.role)}>
               <div className="mb-4">
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                   Email
@@ -362,52 +429,65 @@ export function AdminDashboard() {
                 />
               </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">Permissions</label>
-                <div className="mt-2 space-y-2">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="canRegister"
-                      checked={newAgent.canRegisterProperties}
-                      onChange={(e) =>
-                        setNewAgent({ ...newAgent, canRegisterProperties: e.target.checked })
-                      }
-                      className="h-4 w-4 text-blue-600 rounded"
-                    />
-                    <label htmlFor="canRegister" className="ml-2 text-sm text-gray-600">
-                      Can Register Properties
-                    </label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="canEdit"
-                      checked={newAgent.canEditProperties}
-                      onChange={(e) =>
-                        setNewAgent({ ...newAgent, canEditProperties: e.target.checked })
-                      }
-                      className="h-4 w-4 text-blue-600 rounded"
-                    />
-                    <label htmlFor="canEdit" className="ml-2 text-sm text-gray-600">
-                      Can Edit Properties
-                    </label>
-                  </div>
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="canDelete"
-                      checked={newAgent.canDeleteProperties}
-                      onChange={(e) =>
-                        setNewAgent({ ...newAgent, canDeleteProperties: e.target.checked })
-                      }
-                      className="h-4 w-4 text-blue-600 rounded"
-                    />
-                    <label htmlFor="canDelete" className="ml-2 text-sm text-gray-600">
-                      Can Delete Properties
-                    </label>
+                <label className="block text-sm font-medium text-gray-700">Role</label>
+                <select
+                  value={newAgent.role}
+                  onChange={(e) => setNewAgent({ ...newAgent, role: e.target.value as 'agent' | 'admin' })}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                >
+                  <option value="agent">Agent</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              {newAgent.role === 'agent' && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Permissions</label>
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="canRegister"
+                        checked={newAgent.canRegisterProperties}
+                        onChange={(e) =>
+                          setNewAgent({ ...newAgent, canRegisterProperties: e.target.checked })
+                        }
+                        className="h-4 w-4 text-blue-600 rounded"
+                      />
+                      <label htmlFor="canRegister" className="ml-2 text-sm text-gray-600">
+                        Can Register Properties
+                      </label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="canEdit"
+                        checked={newAgent.canEditProperties}
+                        onChange={(e) =>
+                          setNewAgent({ ...newAgent, canEditProperties: e.target.checked })
+                        }
+                        className="h-4 w-4 text-blue-600 rounded"
+                      />
+                      <label htmlFor="canEdit" className="ml-2 text-sm text-gray-600">
+                        Can Edit Properties
+                      </label>
+                    </div>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="canDelete"
+                        checked={newAgent.canDeleteProperties}
+                        onChange={(e) =>
+                          setNewAgent({ ...newAgent, canDeleteProperties: e.target.checked })
+                        }
+                        className="h-4 w-4 text-blue-600 rounded"
+                      />
+                      <label htmlFor="canDelete" className="ml-2 text-sm text-gray-600">
+                        Can Delete Properties
+                      </label>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
               <div className="flex justify-end space-x-2">
                 <button
                   type="button"
@@ -420,13 +500,48 @@ export function AdminDashboard() {
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
-                  Create Agent
+                  Create {newAgent.role.charAt(0).toUpperCase() + newAgent.role.slice(1)}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Activity Logs Section */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Agent Activity Logs</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Property</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {activityLogs.map((log) => (
+                <tr key={log.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    {agents.find((agent) => agent.id === log.agent_id)?.email || 'Unknown'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{log.action}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    {combinedProperties.find((prop) => prop.id === log.property_id)?.name || 'N/A'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{JSON.stringify(log.details)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    {new Date(log.created_at).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       {/* Properties Section */}
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
@@ -514,7 +629,7 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      <style jsx>{`
+      <style >{`
         .animate-slide-down {
           animation: slideDown 0.3s ease-out;
         }

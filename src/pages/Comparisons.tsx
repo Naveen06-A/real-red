@@ -1,23 +1,29 @@
-// src/pages/Comparisons.tsx
 import { ChartOptions } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
 import { motion } from 'framer-motion';
-import { PropertyDetails, PropertyMetrics, TopLister, CommissionEarner, Agent, Agency } from './Reports';
-
-// Register Chart.js components
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip } from 'chart.js';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip);
+import { useMemo } from 'react';
+import { PropertyMetrics, TopLister, CommissionEarner, Agent, Agency } from './Reports';
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
 
+const OUR_AGENCY = 'Harcourt Success';
+
 interface ComparisonsProps {
   propertyMetrics: PropertyMetrics | null;
+  isLoading?: boolean;
 }
 
-export function Comparisons({ propertyMetrics }: ComparisonsProps) {
+export function Comparisons({ propertyMetrics, isLoading }: ComparisonsProps) {
   console.log('Comparisons rendered with propertyMetrics:', propertyMetrics);
+
+  if (isLoading) {
+    return (
+      <div className="bg-white p-6 rounded-xl shadow-lg text-center">
+        <p className="text-gray-500">Loading comparison data...</p>
+      </div>
+    );
+  }
 
   if (!propertyMetrics) {
     return (
@@ -28,6 +34,9 @@ export function Comparisons({ propertyMetrics }: ComparisonsProps) {
   }
 
   const renderTopListersComparison = () => {
+    if (!propertyMetrics.topListersBySuburb || !propertyMetrics.ourListingsBySuburb) {
+      return <p className="text-gray-500">Top listers data unavailable</p>;
+    }
     return (
       <motion.div
         className="bg-white p-6 rounded-xl shadow-lg mb-6"
@@ -45,10 +54,18 @@ export function Comparisons({ propertyMetrics }: ComparisonsProps) {
           <table className="min-w-full">
             <thead>
               <tr className="bg-blue-600 text-white">
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Suburb</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Top Lister</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Listings</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Harcourt Success Listings</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                  Suburb
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                  Top Lister
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                  Listings
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                  {OUR_AGENCY} Listings
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -68,20 +85,29 @@ export function Comparisons({ propertyMetrics }: ComparisonsProps) {
   };
 
   const renderCommissionComparison = () => {
-    const commissionData = {
-      labels: [...propertyMetrics.topCommissionEarners.map((e: CommissionEarner) => e.agent), 'Harcourt Success'],
-      datasets: [
-        {
-          label: 'Commission Earned',
-          data: [...propertyMetrics.topCommissionEarners.map((e: CommissionEarner) => e.commission), propertyMetrics.ourCommission],
-          backgroundColor: [...Array(propertyMetrics.topCommissionEarners.length).fill('#FF6384'), '#36A2EB'],
-        },
-      ],
-    };
+    if (!propertyMetrics.topCommissionEarners || propertyMetrics.ourCommission === undefined) {
+      return <p className="text-gray-500">Commission data unavailable</p>;
+    }
+    const commissionData = useMemo(
+      () => ({
+        labels: [...propertyMetrics.topCommissionEarners.map((e: CommissionEarner) => e.agent), OUR_AGENCY],
+        datasets: [
+          {
+            label: 'Commission Earned',
+            data: [
+              ...propertyMetrics.topCommissionEarners.map((e: CommissionEarner) => e.commission),
+              propertyMetrics.ourCommission,
+            ],
+            backgroundColor: [...Array(propertyMetrics.topCommissionEarners.length).fill('#FF6384'), '#36A2EB'],
+          },
+        ],
+      }),
+      [propertyMetrics]
+    );
 
     const options: ChartOptions<'bar'> = {
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: 'top' },
         title: { display: true, text: 'Commission Comparison', font: { size: 18, weight: 'bold' } },
         tooltip: {
           callbacks: {
@@ -122,20 +148,26 @@ export function Comparisons({ propertyMetrics }: ComparisonsProps) {
   };
 
   const renderAgentComparison = () => {
-    const agentData = {
-      labels: [...propertyMetrics.topAgents.map((a: Agent) => a.name), propertyMetrics.ourAgentStats.name],
-      datasets: [
-        {
-          label: 'Sales',
-          data: [...propertyMetrics.topAgents.map((a: Agent) => a.sales), propertyMetrics.ourAgentStats.sales],
-          backgroundColor: [...Array(propertyMetrics.topAgents.length).fill('#FFCE56'), '#4BC0C0'],
-        },
-      ],
-    };
+    if (!propertyMetrics.topAgents || !propertyMetrics.ourAgentStats) {
+      return <p className="text-gray-500">Agent data unavailable</p>;
+    }
+    const agentData = useMemo(
+      () => ({
+        labels: [...propertyMetrics.topAgents.map((a: Agent) => a.name), propertyMetrics.ourAgentStats.name],
+        datasets: [
+          {
+            label: 'Sales',
+            data: [...propertyMetrics.topAgents.map((a: Agent) => a.sales), propertyMetrics.ourAgentStats.sales],
+            backgroundColor: [...Array(propertyMetrics.topAgents.length).fill('#FFCE56'), '#4BC0C0'],
+          },
+        ],
+      }),
+      [propertyMetrics]
+    );
 
     const options: ChartOptions<'bar'> = {
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: 'top' },
         title: { display: true, text: 'Agent Performance', font: { size: 18, weight: 'bold' } },
         tooltip: {
           callbacks: {
@@ -173,20 +205,26 @@ export function Comparisons({ propertyMetrics }: ComparisonsProps) {
   };
 
   const renderAgencyComparison = () => {
-    const agencyData = {
-      labels: [...propertyMetrics.topAgencies.map((a: Agency) => a.name), 'Harcourt Success'],
-      datasets: [
-        {
-          label: 'Sales',
-          data: [...propertyMetrics.topAgencies.map((a: Agency) => a.sales), propertyMetrics.ourAgencyStats.sales],
-          backgroundColor: [...Array(propertyMetrics.topAgencies.length).fill('#FF9F40'), '#9966FF'],
-        },
-      ],
-    };
+    if (!propertyMetrics.topAgencies || !propertyMetrics.ourAgencyStats) {
+      return <p className="text-gray-500">Agency data unavailable</p>;
+    }
+    const agencyData = useMemo(
+      () => ({
+        labels: [...propertyMetrics.topAgencies.map((a: Agency) => a.name), OUR_AGENCY],
+        datasets: [
+          {
+            label: 'Sales',
+            data: [...propertyMetrics.topAgencies.map((a: Agency) => a.sales), propertyMetrics.ourAgencyStats.sales],
+            backgroundColor: [...Array(propertyMetrics.topAgencies.length).fill('#FF9F40'), '#9966FF'],
+          },
+        ],
+      }),
+      [propertyMetrics]
+    );
 
     const options: ChartOptions<'bar'> = {
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: 'top' },
         title: { display: true, text: 'Agency Performance', font: { size: 18, weight: 'bold' } },
         tooltip: {
           callbacks: {
@@ -224,7 +262,7 @@ export function Comparisons({ propertyMetrics }: ComparisonsProps) {
   };
 
   return (
-    <div>
+    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
       {renderTopListersComparison()}
       {renderCommissionComparison()}
       {renderAgentComparison()}
