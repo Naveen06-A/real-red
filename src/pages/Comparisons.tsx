@@ -1,81 +1,80 @@
-import { ChartOptions } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
+import { ChartOptions } from 'chart.js';
+import { PropertyMetrics } from './types/types';
 import { motion } from 'framer-motion';
-import { useMemo } from 'react';
-import { PropertyMetrics, TopLister, CommissionEarner, Agent, Agency } from './Reports';
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
-
-const OUR_AGENCY = 'Harcourt Success';
+import { formatCurrency } from './Reports'; // Importing formatCurrency from Reports.tsx
 
 interface ComparisonsProps {
   propertyMetrics: PropertyMetrics | null;
-  isLoading?: boolean;
+  isLoading: boolean;
 }
 
 export function Comparisons({ propertyMetrics, isLoading }: ComparisonsProps) {
-  console.log('Comparisons rendered with propertyMetrics:', propertyMetrics);
-
   if (isLoading) {
     return (
-      <div className="bg-white p-6 rounded-xl shadow-lg text-center">
-        <p className="text-gray-500">Loading comparison data...</p>
+      <div className="flex justify-center items-center py-8">
+        <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
       </div>
     );
   }
 
   if (!propertyMetrics) {
-    return (
-      <div className="bg-white p-6 rounded-xl shadow-lg text-center">
-        <p className="text-gray-500">No comparison data available</p>
-      </div>
-    );
+    return <p className="text-gray-500 text-center py-4">No comparison data available.</p>;
   }
 
-  const renderTopListersComparison = () => {
-    if (!propertyMetrics.topListersBySuburb || !propertyMetrics.ourListingsBySuburb) {
-      return <p className="text-gray-500">Top listers data unavailable</p>;
-    }
+  // Helper function to format numbers
+  const formatNumber = (value: number) => value.toLocaleString();
+
+  // 1. Top Listers by Suburb vs Our Position
+  const renderTopListersBySuburb = () => {
+    const suburbs = Object.keys(propertyMetrics.topListersBySuburb);
+    const tableData = suburbs.map((suburb) => ({
+      suburb,
+      topLister: propertyMetrics.topListersBySuburb[suburb].agent,
+      topListerCount: propertyMetrics.topListersBySuburb[suburb].count,
+      ourListings: propertyMetrics.ourListingsBySuburb[suburb] || 0,
+    }));
+
     return (
       <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg mb-6"
+        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
-          Top Listers by Suburb
-        </h2>
+          Top Listers by Suburb vs Our Position
+        </h3>
         <div className="overflow-x-auto">
-          <table className="min-w-full">
+          <table className="w-full border-collapse">
             <thead>
-              <tr className="bg-blue-600 text-white">
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Suburb
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Top Lister
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Listings
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  {OUR_AGENCY} Listings
-                </th>
+              <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white">
+                <th className="p-4 text-left text-sm font-semibold">Suburb</th>
+                <th className="p-4 text-left text-sm font-semibold">Top Lister</th>
+                <th className="p-4 text-left text-sm font-semibold">Top Lister Count</th>
+                <th className="p-4 text-left text-sm font-semibold">Our Listings</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {Object.entries(propertyMetrics.topListersBySuburb).map(([suburb, data]: [string, TopLister]) => (
-                <tr key={suburb} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">{suburb}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">{data.agent}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">{data.count}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">{propertyMetrics.ourListingsBySuburb[suburb] || 0}</td>
-                </tr>
+            <tbody>
+              {tableData.map((row, index) => (
+                <motion.tr
+                  key={row.suburb}
+                  className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.3, delay: index * 0.1 }}
+                >
+                  <td className="p-4 text-gray-700">{row.suburb}</td>
+                  <td className="p-4 text-gray-700">{row.topLister || 'N/A'}</td>
+                  <td className="p-4 text-gray-700">{formatNumber(row.topListerCount)}</td>
+                  <td className="p-4 text-gray-700">{formatNumber(row.ourListings)}</td>
+                </motion.tr>
               ))}
             </tbody>
           </table>
@@ -84,34 +83,29 @@ export function Comparisons({ propertyMetrics, isLoading }: ComparisonsProps) {
     );
   };
 
+  // 2. Highest-Earning Agents by Commission vs Our Performance
   const renderCommissionComparison = () => {
-    if (!propertyMetrics.topCommissionEarners || propertyMetrics.ourCommission === undefined) {
-      return <p className="text-gray-500">Commission data unavailable</p>;
-    }
-    const commissionData = useMemo(
-      () => ({
-        labels: [...propertyMetrics.topCommissionEarners.map((e: CommissionEarner) => e.agent), OUR_AGENCY],
-        datasets: [
-          {
-            label: 'Commission Earned',
-            data: [
-              ...propertyMetrics.topCommissionEarners.map((e: CommissionEarner) => e.commission),
-              propertyMetrics.ourCommission,
-            ],
-            backgroundColor: [...Array(propertyMetrics.topCommissionEarners.length).fill('#FF6384'), '#36A2EB'],
-          },
-        ],
-      }),
-      [propertyMetrics]
-    );
+    const labels = [...propertyMetrics.topCommissionEarners.map(e => e.agent), propertyMetrics.ourAgentStats.name];
+    const data = [...propertyMetrics.topCommissionEarners.map(e => e.commission), propertyMetrics.ourCommission];
+
+    const commissionData = {
+      labels,
+      datasets: [
+        {
+          label: 'Commission Earned',
+          data,
+          backgroundColor: [...Array(propertyMetrics.topCommissionEarners.length).fill('#36A2EB'), '#FF6384'],
+        },
+      ],
+    };
 
     const options: ChartOptions<'bar'> = {
       plugins: {
-        legend: { display: true, position: 'top' },
-        title: { display: true, text: 'Commission Comparison', font: { size: 18, weight: 'bold' } },
+        legend: { position: 'top', labels: { font: { size: 14 } } },
+        title: { display: true, text: 'Top Commission Earners vs Our Performance', font: { size: 18, weight: 'bold' } },
         tooltip: {
           callbacks: {
-            label: (context) => formatCurrency(context.raw as number),
+            label: (context) => `${context.dataset.label}: ${formatCurrency(context.raw as number)}`,
           },
         },
       },
@@ -126,147 +120,134 @@ export function Comparisons({ propertyMetrics, isLoading }: ComparisonsProps) {
 
     return (
       <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg mb-6"
+        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          Commission Comparison
-        </h2>
+          Top Commission Earners vs Our Performance
+        </h3>
         <Bar data={commissionData} options={options} />
       </motion.div>
     );
   };
 
-  const renderAgentComparison = () => {
-    if (!propertyMetrics.topAgents || !propertyMetrics.ourAgentStats) {
-      return <p className="text-gray-500">Agent data unavailable</p>;
-    }
-    const agentData = useMemo(
-      () => ({
-        labels: [...propertyMetrics.topAgents.map((a: Agent) => a.name), propertyMetrics.ourAgentStats.name],
-        datasets: [
-          {
-            label: 'Sales',
-            data: [...propertyMetrics.topAgents.map((a: Agent) => a.sales), propertyMetrics.ourAgentStats.sales],
-            backgroundColor: [...Array(propertyMetrics.topAgents.length).fill('#FFCE56'), '#4BC0C0'],
-          },
-        ],
-      }),
-      [propertyMetrics]
-    );
+  // 3. Leading Individual Agents vs Our Results
+  const renderAgentSalesComparison = () => {
+    const labels = [...propertyMetrics.topAgents.map(a => a.name), propertyMetrics.ourAgentStats.name];
+    const data = [...propertyMetrics.topAgents.map(a => a.sales), propertyMetrics.ourAgentStats.sales];
+
+    const agentData = {
+      labels,
+      datasets: [
+        {
+          label: 'Sales Count',
+          data,
+          backgroundColor: [...Array(propertyMetrics.topAgents.length).fill('#36A2EB'), '#FF6384'],
+        },
+      ],
+    };
 
     const options: ChartOptions<'bar'> = {
       plugins: {
-        legend: { display: true, position: 'top' },
-        title: { display: true, text: 'Agent Performance', font: { size: 18, weight: 'bold' } },
+        legend: { position: 'top', labels: { font: { size: 14 } } },
+        title: { display: true, text: 'Top Agents by Sales vs Our Performance', font: { size: 18, weight: 'bold' } },
         tooltip: {
           callbacks: {
-            label: (context) => `${context.raw} sales`,
+            label: (context) => `${context.dataset.label}: ${formatNumber(context.raw as number)}`,
           },
         },
       },
       scales: {
-        y: { beginAtZero: true, ticks: { font: { size: 12 } } },
+        y: {
+          beginAtZero: true,
+          ticks: { font: { size: 12 } },
+        },
         x: { ticks: { font: { size: 12 } } },
       },
     };
 
     return (
       <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg mb-6"
+        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 005.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-            />
+        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a2 2 0 00-2-2h-3m-2 4h-5v-2a2 2 0 012-2h3m-2-4H7a2 2 0 00-2 2v2h5m2-4h5V7a2 2 0 00-2-2h-3m2 4H7" />
           </svg>
-          Agent Performance
-        </h2>
+          Top Agents by Sales vs Our Performance
+        </h3>
         <Bar data={agentData} options={options} />
       </motion.div>
     );
   };
 
-  const renderAgencyComparison = () => {
-    if (!propertyMetrics.topAgencies || !propertyMetrics.ourAgencyStats) {
-      return <p className="text-gray-500">Agency data unavailable</p>;
-    }
-    const agencyData = useMemo(
-      () => ({
-        labels: [...propertyMetrics.topAgencies.map((a: Agency) => a.name), OUR_AGENCY],
-        datasets: [
-          {
-            label: 'Sales',
-            data: [...propertyMetrics.topAgencies.map((a: Agency) => a.sales), propertyMetrics.ourAgencyStats.sales],
-            backgroundColor: [...Array(propertyMetrics.topAgencies.length).fill('#FF9F40'), '#9966FF'],
-          },
-        ],
-      }),
-      [propertyMetrics]
-    );
+  // 4. Top-Selling Agencies vs Our Standings
+  const renderAgencySalesComparison = () => {
+    const labels = [...propertyMetrics.topAgencies.map(a => a.name), propertyMetrics.ourAgencyStats.name];
+    const data = [...propertyMetrics.topAgencies.map(a => a.sales), propertyMetrics.ourAgencyStats.sales];
+
+    const agencyData = {
+      labels,
+      datasets: [
+        {
+          label: 'Sales Count',
+          data,
+          backgroundColor: [...Array(propertyMetrics.topAgencies.length).fill('#36A2EB'), '#FF6384'],
+        },
+      ],
+    };
 
     const options: ChartOptions<'bar'> = {
       plugins: {
-        legend: { display: true, position: 'top' },
-        title: { display: true, text: 'Agency Performance', font: { size: 18, weight: 'bold' } },
+        legend: { position: 'top', labels: { font: { size: 14 } } },
+        title: { display: true, text: 'Top Agencies by Sales vs Our Standings', font: { size: 18, weight: 'bold' } },
         tooltip: {
           callbacks: {
-            label: (context) => `${context.raw} sales`,
+            label: (context) => `${context.dataset.label}: ${formatNumber(context.raw as number)}`,
           },
         },
       },
       scales: {
-        y: { beginAtZero: true, ticks: { font: { size: 12 } } },
+        y: {
+          beginAtZero: true,
+          ticks: { font: { size: 12 } },
+        },
         x: { ticks: { font: { size: 12 } } },
       },
     };
 
     return (
       <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg mb-6"
+        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a2 2 0 012-2h2a2 2 0 012 2v5m-4 0h4"
-            />
+        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a2 2 0 012-2h2a2 2 0 012 2v5m-4 0h-4" />
           </svg>
-          Agency Performance
-        </h2>
+          Top Agencies by Sales vs Our Standings
+        </h3>
         <Bar data={agencyData} options={options} />
       </motion.div>
     );
   };
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-      {renderTopListersComparison()}
+    <div className="space-y-8">
+      {renderTopListersBySuburb()}
       {renderCommissionComparison()}
-      {renderAgentComparison()}
-      {renderAgencyComparison()}
+      {renderAgentSalesComparison()}
+      {renderAgencySalesComparison()}
     </div>
   );
 }

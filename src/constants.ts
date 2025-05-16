@@ -1,0 +1,1 @@
+export const OUR_AGENCY = 'Harcourt Success';

@@ -31,7 +31,7 @@ import { EditModal } from './EditModal';
 import { AgentPropertyMap } from './AgentPropertyMap';
 import { CommissionByAgency } from './CommissionByAgency';
 import { Comparisons } from './Comparisons';
-import { TopLister, CommissionEarner, Agent, Agency, PropertyMetrics } from './types.ts';
+
 // Register ChartJS components
 ChartJS.register(
   CategoryScale,
@@ -55,25 +55,6 @@ interface User {
 interface UserProfile {
   name: string;
   role: 'user' | 'agent' | 'admin';
-}
-interface TopLister {
-  agent: string;
-  count: number;
-}
-
-interface CommissionEarner {
-  agent: string;
-  commission: number;
-}
-
-interface Agent {
-  name: string;
-  sales: number;
-}
-
-interface Agency {
-  name: string;
-  sales: number;
 }
 
 export interface PropertyDetails {
@@ -145,14 +126,6 @@ interface PropertyMetrics {
   totalListings: number;
   totalSales: number;
   overallAvgSalePrice: number;
-  topListersBySuburb: Record<string, TopLister>;
-  ourListingsBySuburb: Record<string, number>;
-  topCommissionEarners: CommissionEarner[];
-  ourCommission: number;
-  topAgents: Agent[];
-  ourAgentStats: Agent;
-  topAgencies: Agency[];
-  ourAgencyStats: Agency;
 }
 
 interface Filters {
@@ -166,45 +139,44 @@ interface Filters {
 
 // Helper function to normalize suburb and postcode
 const normalizeSuburb = (suburb: string | undefined | null): string => {
-  if (!suburb) return 'Unknown';
+  if (!suburb) return 'UNKNOWN';
   const trimmed = suburb.trim().toLowerCase();
   const suburbMap: { [key: string]: string } = {
-    'pullenvale': 'pullenvale 4069',
-    'pullenvale qld': 'pullenvale 4069',
-    'pullenvale qld (4069)': 'pullenvale 4069',
-    'brookfield': 'brookfield 4069',
-    'brookfield qld': 'brookfield 4069',
-    'brookfield qld (4069)': 'brookfield 4069',
-    'anstead': 'anstead 4070',
-    'anstead qld': 'anstead 4070',
-    'anstead qld (4070)': 'anstead 4070',
-    'chapel hill': 'chapell hill 4069',
-    'chapel hill qld': 'chapell hill 4069',
-    'chapell hill qld (4069)': 'chapell hill 4069',
-    'kenmore': 'kenmore 4069',
-    'kenmore qld': 'kenmore 4069',
-    'kenmore qld (4069)': 'kenmore 4069',
-    'kenmore hills': 'kenmore hills 4069',
-    'kenmore hills qld': 'kenmore hills 4069',
-    'kenmore hills qld (4069)': 'kenmore hills 4069',
-    'fig tree pocket': 'fig tree pocket 4069',
-    'fig tree pocket qld': 'fig tree pocket 4069',
-    'fig tree pocket qld (4069)': 'fig tree pocket 4069',
-    'pinjarra hills': 'pinjarra hills 4069',
-    'pinjarra hills qld': 'pinjarra hills 4069',
-    'pinjarra hills qld (4069)': 'pinjarra hills 4069',
-    'moggill': 'moggill qld (4070)',
-    'moggill qld': 'moggill qld (4070)',
-    'moggill qld (4070)': 'moggill qld (4070)',
-    'bellbowrie': 'bellbowrie qld (4070)',
-    'bellbowrie qld': 'bellbowrie qld (4070)',
-    'bellbowrie qld (4070)': 'bellbowrie qld (4070)',
+    'pullenvale': 'PULLENVALE 4069',
+    'pullenvale qld': 'PULLENVALE 4069',
+    'pullenvale qld (4069)': 'PULLENVALE 4069',
+    'brookfield': 'BROOKFIELD 4069',
+    'brookfield qld': 'BROOKFIELD 4069',
+    'brookfield qld (4069)': 'BROOKFIELD 4069',
+    'anstead': 'ANSTEAD 4070',
+    'anstead qld': 'ANSTEAD 4070',
+    'anstead qld (4070)': 'ANSTEAD 4070',
+    'chapel hill': 'CHAPEL HILL 4069',
+    'chapel hill qld': 'CHAPEL HILL 4069',
+    'chapell hill qld (4069)': 'CHAPEL HILL 4069',
+    'kenmore': 'KENMORE 4069',
+    'kenmore qld': 'KENMORE 4069',
+    'kenmore qld (4069)': 'KENMORE 4069',
+    'kenmore hills': 'KENMORE HILLS 4069',
+    'kenmore hills qld': 'KENMORE HILLS 4069',
+    'kenmore hills qld (4069)': 'KENMORE HILLS 4069',
+    'fig tree pocket': 'FIG TREE POCKET 4069',
+    'fig tree pocket qld': 'FIG TREE POCKET 4069',
+    'fig tree pocket qld (4069)': 'FIG TREE POCKET 4069',
+    'pinjarra hills': 'PINJARRA HILLS 4069',
+    'pinjarra hills qld': 'PINJARRA HILLS 4069',
+    'pinjarra hills qld (4069)': 'PINJARRA HILLS 4069',
+    'moggill': 'MOGGILL QLD (4070)',
+    'moggill qld': 'MOGGILL QLD (4070)',
+    'moggill qld (4070)': 'MOGGILL QLD (4070)',
+    'bellbowrie': 'BELLBOWRIE QLD (4070)',
+    'bellbowrie qld': 'BELLBOWRIE QLD (4070)',
+    'bellbowrie qld (4070)': 'BELLBOWRIE QLD (4070)',
   };
   const normalized = suburbMap[trimmed] || trimmed;
-  console.log(`Normalizing suburb: ${suburb} -> ${normalized}`);
-  return normalized;
+  console.log(`Normalizing suburb: ${suburb} -> ${normalized.toUpperCase()}`);
+  return normalized.toUpperCase();
 };
-
 // Helper functions
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
@@ -627,31 +599,30 @@ export function Reports() {
       upper: predicted + confidenceInterval,
     };
   };
-const OUR_AGENCY = 'Harcourt Success';
 
-const generatePropertyMetrics = (data: PropertyDetails[]) => {
-  try {
-    console.log('Generating property metrics for:', data.length, 'properties');
-    const listingsBySuburb: Record<string, { listed: number; sold: number }> = {};
-    const listingsByStreetName: Record<string, { listed: number; sold: number }> = {};
-    const listingsByStreetNumber: Record<string, { listed: number; sold: number }> = {};
-    const listingsByAgent: Record<string, { listed: number; sold: number }> = {};
-    const listingsByAgency: Record<string, { listed: number; sold: number }> = {};
-    const avgSalePriceBySuburb: Record<string, number> = {};
-    const avgSalePriceByStreetName: Record<string, number> = {};
-    const avgSalePriceByStreetNumber: Record<string, number> = {};
-    const avgSalePriceByAgent: Record<string, number> = {};
-    const avgSalePriceByAgency: Record<string, number> = {};
-    const predictedAvgPriceBySuburb: Record<string, number> = {};
-    const predictedConfidenceBySuburb: Record<string, { lower: number; upper: number }> = {};
-    const priceTrendsBySuburb: Record<string, Record<string, number>> = {};
-    const commissionByAgency: Record<string, Record<string, number>> = {};
-    const propertyDetails: PropertyDetails[] = [];
-    let totalListings = 0;
-    let totalSales = 0;
-    let totalPriceSum = 0;
+  const generatePropertyMetrics = (data: PropertyDetails[]) => {
+    try {
+      console.log('Generating property metrics for:', data.length, 'properties');
+      const listingsBySuburb: Record<string, { listed: number; sold: number }> = {};
+      const listingsByStreetName: Record<string, { listed: number; sold: number }> = {};
+      const listingsByStreetNumber: Record<string, { listed: number; sold: number }> = {};
+      const listingsByAgent: Record<string, { listed: number; sold: number }> = {};
+      const listingsByAgency: Record<string, { listed: number; sold: number }> = {};
+      const avgSalePriceBySuburb: Record<string, number> = {};
+      const avgSalePriceByStreetName: Record<string, number> = {};
+      const avgSalePriceByStreetNumber: Record<string, number> = {};
+      const avgSalePriceByAgent: Record<string, number> = {};
+      const avgSalePriceByAgency: Record<string, number> = {};
+      const predictedAvgPriceBySuburb: Record<string, number> = {};
+      const predictedConfidenceBySuburb: Record<string, { lower: number; upper: number }> = {};
+      const priceTrendsBySuburb: Record<string, Record<string, number>> = {};
+      const commissionByAgency: Record<string, Record<string, number>> = {};
+      const propertyDetails: PropertyDetails[] = [];
+      let totalListings = 0;
+      let totalSales = 0;
+      let totalPriceSum = 0;
 
-    // Metrics for Comparisons
+      // New metrics for Comparisons
     const listingsByAgentBySuburb: Record<string, Record<string, number>> = {};
     const topListersBySuburb: Record<string, TopLister> = {};
     const ourListingsBySuburb: Record<string, number> = {};
@@ -659,211 +630,152 @@ const generatePropertyMetrics = (data: PropertyDetails[]) => {
     const salesByAgent: Record<string, number> = {};
     const salesByAgency: Record<string, number> = {};
 
-    data.forEach((prop) => {
-      const suburb = normalizeSuburb(prop.suburb);
-      const postcode = prop.postcode || 'Unknown';
-      const streetName = prop.street_name || 'Unknown';
-      const streetNumber = prop.street_number || 'Unknown';
-      const agent = prop.agent_name || 'Unknown';
-      const agency = prop.agency_name || 'Unknown';
-      const propertyType = prop.property_type || 'Unknown';
+      data.forEach((prop) => {
+        const suburb = normalizeSuburb(prop.suburb);
+        const postcode = prop.postcode || 'Unknown';
+        const streetName = prop.street_name || 'Unknown';
+        const streetNumber = prop.street_number || 'Unknown';
+        const agent = prop.agent_name || 'Unknown';
+        const agency = prop.agency_name || 'Unknown';
+        const propertyType = prop.property_type || 'Unknown';
 
-      // Existing metrics
-      listingsBySuburb[suburb] = listingsBySuburb[suburb] || { listed: 0, sold: 0 };
-      listingsBySuburb[suburb].listed += 1;
-      totalListings += 1;
-      if (prop.category === 'Sold') {
-        listingsBySuburb[suburb].sold += 1;
-        totalSales += 1;
-      }
+        listingsBySuburb[suburb] = listingsBySuburb[suburb] || { listed: 0, sold: 0 };
+        listingsBySuburb[suburb].listed += 1;
+        totalListings += 1;
+        if (prop.category === 'Sold') {
+          listingsBySuburb[suburb].sold += 1;
+          totalSales += 1;
+        }
 
-      listingsByStreetName[streetName] = listingsByStreetName[streetName] || { listed: 0, sold: 0 };
-      listingsByStreetName[streetName].listed += 1;
-      if (prop.category === 'Sold') listingsByStreetName[streetName].sold += 1;
+        listingsByStreetName[streetName] = listingsByStreetName[streetName] || { listed: 0, sold: 0 };
+        listingsByStreetName[streetName].listed += 1;
+        if (prop.category === 'Sold') {
+          listingsByStreetName[streetName].sold += 1;
+        }
 
-      listingsByStreetNumber[streetNumber] = listingsByStreetNumber[streetNumber] || { listed: 0, sold: 0 };
-      listingsByStreetNumber[streetNumber].listed += 1;
-      if (prop.category === 'Sold') listingsByStreetNumber[streetNumber].sold += 1;
+        listingsByStreetNumber[streetNumber] = listingsByStreetNumber[streetNumber] || { listed: 0, sold: 0 };
+        listingsByStreetNumber[streetNumber].listed += 1;
+        if (prop.category === 'Sold') {
+          listingsByStreetNumber[streetNumber].sold += 1;
+        }
 
-      listingsByAgent[agent] = listingsByAgent[agent] || { listed: 0, sold: 0 };
-      listingsByAgent[agent].listed += 1;
-      if (prop.category === 'Sold') listingsByAgent[agent].sold += 1;
+        listingsByAgent[agent] = listingsByAgent[agent] || { listed: 0, sold: 0 };
+        listingsByAgent[agent].listed += 1;
+        if (prop.category === 'Sold') {
+          listingsByAgent[agent].sold += 1;
+        }
 
-      listingsByAgency[agency] = listingsByAgency[agency] || { listed: 0, sold: 0 };
-      listingsByAgency[agency].listed += 1;
-      if (prop.category === 'Sold') listingsByAgency[agency].sold += 1;
+        listingsByAgency[agency] = listingsByAgency[agency] || { listed: 0, sold: 0 };
+        listingsByAgency[agency].listed += 1;
+        if (prop.category === 'Sold') {
+          listingsByAgency[agency].sold += 1;
+        }
 
-      const price = prop.sold_price || prop.price;
-      if (price) {
-        avgSalePriceBySuburb[suburb] =
-          ((avgSalePriceBySuburb[suburb] || 0) * (listingsBySuburb[suburb].sold || listingsBySuburb[suburb].listed - 1) + price) /
-          (listingsBySuburb[suburb].sold || listingsBySuburb[suburb].listed);
-        avgSalePriceByStreetName[streetName] =
-          ((avgSalePriceByStreetName[streetName] || 0) * (listingsByStreetName[streetName].sold || listingsByStreetName[streetName].listed - 1) + price) /
-          (listingsByStreetName[streetName].sold || listingsByStreetName[streetName].listed);
-        avgSalePriceByStreetNumber[streetNumber] =
-          ((avgSalePriceByStreetNumber[streetNumber] || 0) * (listingsByStreetNumber[streetNumber].sold || listingsByStreetNumber[streetNumber].listed - 1) + price) /
-          (listingsByStreetNumber[streetNumber].sold || listingsByStreetNumber[streetNumber].listed);
-        avgSalePriceByAgent[agent] =
-          ((avgSalePriceByAgent[agent] || 0) * (listingsByAgent[agent].sold || listingsByAgent[agent].listed - 1) + price) /
-          (listingsByAgent[agent].sold || listingsByAgent[agent].listed);
-        avgSalePriceByAgency[agency] =
-          ((avgSalePriceByAgency[agency] || 0) * (listingsByAgency[agency].sold || listingsByAgency[agency].listed - 1) + price) /
-          (listingsByAgency[agency].sold || listingsByAgency[agency].listed);
-        totalPriceSum += price;
-      }
+        const price = prop.sold_price || prop.price;
+        if (price) {
+          avgSalePriceBySuburb[suburb] =
+            ((avgSalePriceBySuburb[suburb] || 0) * (listingsBySuburb[suburb].sold || listingsBySuburb[suburb].listed - 1) + price) /
+            (listingsBySuburb[suburb].sold || listingsBySuburb[suburb].listed);
+          avgSalePriceByStreetName[streetName] =
+            ((avgSalePriceByStreetName[streetName] || 0) * (listingsByStreetName[streetName].sold || listingsByStreetName[streetName].listed - 1) + price) /
+            (listingsByStreetName[streetName].sold || listingsByStreetName[streetName].listed);
+          avgSalePriceByStreetNumber[streetNumber] =
+            ((avgSalePriceByStreetNumber[streetNumber] || 0) * (listingsByStreetNumber[streetNumber].sold || listingsByStreetNumber[streetNumber].listed - 1) + price) /
+            (listingsByStreetNumber[streetNumber].sold || listingsByStreetNumber[streetNumber].listed);
+          avgSalePriceByAgent[agent] =
+            ((avgSalePriceByAgent[agent] || 0) * (listingsByAgent[agent].sold || listingsByAgent[agent].listed - 1) + price) /
+            (listingsByAgent[agent].sold || listingsByAgent[agent].listed);
+          avgSalePriceByAgency[agency] =
+            ((avgSalePriceByAgency[agency] || 0) * (listingsByAgency[agency].sold || listingsByAgency[agency].listed - 1) + price) /
+            (listingsByAgency[agency].sold || listingsByAgency[agency].listed);
+          totalPriceSum += price;
+        }
 
-      const { commissionRate, commissionEarned } = calculateCommission(prop);
-      if (agency !== 'Unknown' && commissionEarned > 0) {
-        commissionByAgency[agency] = commissionByAgency[agency] || {};
-        commissionByAgency[agency][propertyType] =
-          (commissionByAgency[agency][propertyType] || 0) + commissionEarned;
-      }
+        const { commissionRate, commissionEarned } = calculateCommission(prop);
 
-      propertyDetails.push({
-        id: prop.id,
-        street_name: streetName,
-        street_number: streetNumber,
-        agent_name: agent,
-        suburb,
-        postcode,
-        price: prop.price || 0,
-        sold_price: prop.sold_price,
-        category: prop.category || 'Unknown',
-        property_type: prop.property_type || 'Unknown',
-        agency_name: prop.agency_name,
-        commission: commissionRate,
-        commission_earned: commissionEarned,
-        expected_price: prop.expected_price,
-        sale_type: prop.sale_type,
-        bedrooms: prop.bedrooms,
-        bathrooms: prop.bathrooms,
-        car_garage: prop.car_garage,
-        sqm: prop.sqm,
-        landsize: prop.landsize,
-        listed_date: prop.listed_date,
-        sold_date: prop.sold_date,
-        flood_risk: prop.flood_risk,
-        bushfire_risk: prop.bushfire_risk,
-        contract_status: prop.contract_status,
-        features: prop.features,
-        same_street_sales: prop.same_street_sales,
-        past_records: prop.past_records,
+        // Calculate commission by agency and property type
+        if (agency !== 'Unknown' && commissionEarned > 0) {
+          commissionByAgency[agency] = commissionByAgency[agency] || {};
+          commissionByAgency[agency][propertyType] =
+            (commissionByAgency[agency][propertyType] || 0) + commissionEarned;
+        }
+
+        propertyDetails.push({
+          id: prop.id,
+          street_name: streetName,
+          street_number: streetNumber,
+          agent_name: agent,
+          suburb: suburb,
+          postcode: postcode,
+          price: prop.price || 0,
+          sold_price: prop.sold_price,
+          category: prop.category || 'Unknown',
+          property_type: prop.property_type || 'Unknown',
+          agency_name: prop.agency_name,
+          commission: commissionRate,
+          commission_earned: commissionEarned,
+          expected_price: prop.expected_price,
+          sale_type: prop.sale_type,
+          bedrooms: prop.bedrooms,
+          bathrooms: prop.bathrooms,
+          car_garage: prop.car_garage,
+          sqm: prop.sqm,
+          landsize: prop.landsize,
+          listed_date: prop.listed_date,
+          sold_date: prop.sold_date,
+          flood_risk: prop.flood_risk,
+          bushfire_risk: prop.bushfire_risk,
+          contract_status: prop.contract_status,
+          features: prop.features,
+          same_street_sales: prop.same_street_sales,
+          past_records: prop.past_records,
+        });
+
+        const prediction = predictFutureAvgPriceBySuburb(suburb, data);
+        predictedAvgPriceBySuburb[suburb] = prediction.predicted;
+        predictedConfidenceBySuburb[suburb] = { lower: prediction.lower, upper: prediction.upper };
+
+        const date = moment(prop.sold_date || prop.listed_date).format('YYYY-MM');
+        priceTrendsBySuburb[suburb] = priceTrendsBySuburb[suburb] || {};
+        priceTrendsBySuburb[suburb][date] =
+          ((priceTrendsBySuburb[suburb][date] || 0) + (price || 0)) /
+          data.filter(
+            (p) =>
+              normalizeSuburb(p.suburb) === normalizeSuburb(suburb) &&
+              moment(p.sold_date || p.listed_date).format('YYYY-MM') === date
+          ).length;
       });
 
-      const prediction = predictFutureAvgPriceBySuburb(suburb, data);
-      predictedAvgPriceBySuburb[suburb] = prediction.predicted;
-      predictedConfidenceBySuburb[suburb] = { lower: prediction.lower, upper: prediction.upper };
+      const metrics = {
+        listingsBySuburb,
+        listingsByStreetName,
+        listingsByStreetNumber,
+        listingsByAgent,
+        listingsByAgency,
+        avgSalePriceBySuburb,
+        avgSalePriceByStreetName,
+        avgSalePriceByStreetNumber,
+        avgSalePriceByAgent,
+        avgSalePriceByAgency,
+        predictedAvgPriceBySuburb,
+        predictedConfidenceBySuburb,
+        priceTrendsBySuburb,
+        commissionByAgency,
+        propertyDetails,
+        totalListings,
+        totalSales,
+        overallAvgSalePrice: totalSales > 0 ? totalPriceSum / totalSales : 0,
+      };
 
-      const date = moment(prop.sold_date || prop.listed_date).format('YYYY-MM');
-      priceTrendsBySuburb[suburb] = priceTrendsBySuburb[suburb] || {};
-      priceTrendsBySuburb[suburb][date] =
-        ((priceTrendsBySuburb[suburb][date] || 0) + (price || 0)) /
-        data.filter(
-          (p) =>
-            normalizeSuburb(p.suburb) === suburb &&
-            moment(p.sold_date || p.listed_date).format('YYYY-MM') === date
-        ).length;
+      setPropertyMetrics(metrics);
+      console.log('Property metrics generated:', metrics);
+    } catch (err) {
+      console.error('Error generating property metrics:', err);
+      setPropertyMetrics(null);
+      toast.error('Failed to generate property metrics');
+    }
+  };
 
-      // Metrics for Comparisons
-      listingsByAgentBySuburb[suburb] = listingsByAgentBySuburb[suburb] || {};
-      listingsByAgentBySuburb[suburb][agent] = (listingsByAgentBySuburb[suburb][agent] || 0) + 1;
-
-      if (agency === OUR_AGENCY) {
-        ourListingsBySuburb[suburb] = (ourListingsBySuburb[suburb] || 0) + 1;
-      }
-
-      if (commissionEarned > 0) {
-        commissionByAgent[agent] = (commissionByAgent[agent] || 0) + commissionEarned;
-      }
-
-      if (prop.category === 'Sold') {
-        salesByAgent[agent] = (salesByAgent[agent] || 0) + 1;
-        salesByAgency[agency] = (salesByAgency[agency] || 0) + 1;
-      }
-    });
-
-    // Compute top listers by suburb
-    Object.keys(listingsByAgentBySuburb).forEach((suburb) => {
-      const agents = listingsByAgentBySuburb[suburb];
-      const topAgent = Object.entries(agents).reduce(
-        (max, [agent, count]) => (count > max.count ? { agent, count } : max),
-        { agent: '', count: 0 }
-      );
-      topListersBySuburb[suburb] = topAgent;
-    });
-
-    // Compute top commission earners
-    const topCommissionEarners = Object.entries(commissionByAgent)
-      .map(([agent, commission]) => ({ agent, commission }))
-      .sort((a, b) => b.commission - a.commission)
-      .slice(0, 5);
-
-    // Compute our commission
-    const ourCommission = data
-      .filter((prop) => prop.agency_name === OUR_AGENCY)
-      .reduce((sum, prop) => sum + calculateCommission(prop).commissionEarned, 0);
-
-    // Compute top agents
-    const topAgents = Object.entries(salesByAgent)
-      .map(([name, sales]) => ({ name, sales }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 5);
-
-    // Compute our agent stats
-    const ourAgent = Object.entries(salesByAgent).find(([agent]) =>
-      data.some((prop) => prop.agent_name === agent && prop.agency_name === OUR_AGENCY)
-    );
-    const ourAgentStats = ourAgent
-      ? { name: ourAgent[0], sales: ourAgent[1] }
-      : { name: `${OUR_AGENCY} Agent`, sales: 0 };
-
-    // Compute top agencies
-    const topAgencies = Object.entries(salesByAgency)
-      .map(([name, sales]) => ({ name, sales }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 5);
-
-    // Compute our agency stats
-    const ourAgencyStats = { name: OUR_AGENCY, sales: salesByAgency[OUR_AGENCY] || 0 };
-
-    const metrics: PropertyMetrics = {
-      listingsBySuburb,
-      listingsByStreetName,
-      listingsByStreetNumber,
-      listingsByAgent,
-      listingsByAgency,
-      avgSalePriceBySuburb,
-      avgSalePriceByStreetName,
-      avgSalePriceByStreetNumber,
-      avgSalePriceByAgent,
-      avgSalePriceByAgency,
-      predictedAvgPriceBySuburb,
-      predictedConfidenceBySuburb,
-      priceTrendsBySuburb,
-      commissionByAgency,
-      propertyDetails,
-      totalListings,
-      totalSales,
-      overallAvgSalePrice: totalSales > 0 ? totalPriceSum / totalSales : 0,
-      topListersBySuburb,
-      ourListingsBySuburb,
-      topCommissionEarners,
-      ourCommission,
-      topAgents,
-      ourAgentStats,
-      topAgencies,
-      ourAgencyStats,
-    };
-
-    setPropertyMetrics(metrics);
-    console.log('Property metrics generated:', metrics);
-  } catch (err) {
-    console.error('Error generating property metrics:', err);
-    setPropertyMetrics(null);
-    toast.error('Failed to generate property metrics');
-  }
-};
   // Export functions
   const exportPropertyReportPDF = () => {
     if (!propertyMetrics) return;
@@ -1614,20 +1526,6 @@ const generatePropertyMetrics = (data: PropertyDetails[]) => {
                 </h3>
                 {renderPriceTrends()}
               </motion.div>
-                <motion.section
-                className="mb-12"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.5 }}
-              >
-                <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
-                  <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                  </svg>
-                  Performance Comparisons
-                </h2>
-                <Comparisons propertyMetrics={propertyMetrics} isLoading={loading} />
-              </motion.section>
               <div className="flex justify-end space-x-4">
                 <motion.button
                   onClick={() => exportPropertyReportPDF()}
