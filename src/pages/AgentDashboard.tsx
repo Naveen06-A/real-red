@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Mic, Clock, Search, Download, SlidersHorizontal, X, TrendingUp } from 'lucide-react';
+import { Mic, Clock, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2 } from 'lucide-react';
 import { IndividualPropertyReport } from './IndividualPropertyReport';
 import { supabase } from '../lib/supabase';
 import jsPDF from 'jspdf';
@@ -11,6 +11,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrency } from '../utils/formatters';
 import { toast } from 'react-toastify';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { Bar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 interface PredictionResult {
   recommendation: 'BUY' | 'SELL';
@@ -19,6 +31,15 @@ interface PredictionResult {
   historicalData: { dates: string[]; prices: number[] };
   marketCondition?: 'Rising' | 'Stable' | 'Declining';
   sentimentScore?: number;
+}
+
+interface SuburbProgress {
+  suburb: string;
+  totalProperties: number;
+  listedProperties: number;
+  soldProperties: number;
+  avgDaysOnMarket: number;
+  conversionRate: number;
 }
 
 const ALLOWED_SUBURBS = [
@@ -47,6 +68,8 @@ export function AgentDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suburbProgress, setSuburbProgress] = useState<SuburbProgress[]>([]);
+  const [selectedSuburb, setSelectedSuburb] = useState<string | null>(null);
   const [filters, setFilters] = useState<{
     bedrooms: string;
     bathrooms: string;
@@ -72,6 +95,7 @@ export function AgentDashboard() {
   useEffect(() => {
     if (profile?.role === 'agent') {
       fetchPropertiesAndPredict();
+      fetchSuburbProgress();
     } else if (profile && profile.role !== 'agent') {
       navigate('/agent-login');
     }
@@ -121,6 +145,50 @@ export function AgentDashboard() {
     }
   };
 
+  const fetchSuburbProgress = async () => {
+    try {
+      const progressPromises = ALLOWED_SUBURBS.map(async (suburb) => {
+        const { data: properties, error } = await supabase
+          .from('properties')
+          .select('id, category, listed_date, sold_date')
+          .eq('suburb', suburb.name);
+        if (error) throw error;
+
+        const totalProperties = properties?.length || 0;
+        const listedProperties = properties?.filter(p => p.category === 'Listing').length || 0;
+        const soldProperties = properties?.filter(p => p.category === 'Sold').length || 0;
+
+        const avgDaysOnMarket = properties
+          ?.filter(p => p.sold_date && p.listed_date)
+          .map(p => {
+            const listed = new Date(p.listed_date);
+            const sold = new Date(p.sold_date);
+            return (sold.getTime() - listed.getTime()) / (1000 * 60 * 60 * 24);
+          })
+          .reduce((sum, days) => sum + days, 0) / (soldProperties || 1) || 0;
+
+        const result = {
+          suburb: suburb.name,
+          totalProperties,
+          listedProperties,
+          soldProperties,
+          avgDaysOnMarket: Math.round(avgDaysOnMarket),
+          conversionRate: totalProperties ? (soldProperties / totalProperties) * 100 : 0,
+        };
+        console.log(`Progress for ${suburb.name}:`, result);
+        return result;
+      });
+
+      const progressData = await Promise.all(progressPromises);
+      console.log('All suburb progress data:', progressData);
+      setSuburbProgress(progressData.filter(p => p.totalProperties > 0));
+    } catch (error) {
+      console.error('Error fetching suburb progress:', error);
+      toast.error('Failed to fetch suburb progress data');
+      setSuburbProgress([]);
+    }
+  };
+
   const startVoiceCommand = () => {
     if (!('webkitSpeechRecognition' in window)) {
       toast.error('Voice commands not supported in this browser.');
@@ -139,6 +207,8 @@ export function AgentDashboard() {
         navigate('/activity-logger');
       } else if (command.includes('view progress report')) {
         navigate('/progress-report');
+      } else if (command.includes('show suburb progress')) {
+        setSelectedSuburb(ALLOWED_SUBURBS[0].name);
       }
     };
     recognition.start();
@@ -353,6 +423,18 @@ export function AgentDashboard() {
     }
 
     doc.setFontSize(14);
+    doc.text('Suburb Progress Summary', 20, yPos + 10);
+    doc.setFontSize(10);
+    yPos += 20;
+    suburbProgress.forEach((progress) => {
+      doc.text(`${progress.suburb}:`, 20, yPos);
+      doc.text(`Listed: ${progress.listedProperties}/${progress.totalProperties} (${(progress.listedProperties/progress.totalProperties*100).toFixed(1)}%)`, 40, yPos + 5);
+      doc.text(`Conversion Rate: ${progress.conversionRate.toFixed(1)}%`, 40, yPos + 10);
+      doc.text(`Avg Days on Market: ${progress.avgDaysOnMarket}`, 40, yPos + 15);
+      yPos += 25;
+    });
+
+    doc.setFontSize(14);
     doc.text('Summary Statistics', 20, yPos + 10);
     doc.setFontSize(10);
     yPos += 20;
@@ -403,6 +485,99 @@ export function AgentDashboard() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const chartData = suburbProgress.length ? {
+    labels: suburbProgress.map(p => p.suburb),
+    datasets: [
+      {
+        label: 'Listing Progress (%)',
+        data: suburbProgress.map(p => Number(((p.listedProperties / (p.totalProperties || 1)) * 100).toFixed(1))),
+        backgroundColor: 'rgba(59, 130, 246, 0.6)',
+        borderColor: 'rgb(59, 130, 246)',
+        borderWidth: 1,
+      },
+      {
+        label: 'Conversion Rate (%)',
+        data: suburbProgress.map(p => Number(p.conversionRate.toFixed(1))),
+        backgroundColor: 'rgba(16, 185, 129, 0.6)',
+        borderColor: 'rgb(16, 185, 129)',
+        borderWidth: 1,
+      },
+    ],
+  } : {
+    labels: ['No Data'],
+    datasets: [
+      {
+        label: 'Listing Progress (%)',
+        data: [0],
+        backgroundColor: 'rgba(59, 130, 246, 0.6)',
+        borderColor: 'rgb(59, 130, 246)',
+        borderWidth: 1,
+      },
+      {
+        label: 'Conversion Rate (%)',
+        data: [0],
+        backgroundColor: 'rgba(16, 185, 129, 0.6)',
+        borderColor: 'rgb(16, 185, 129)',
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+        labels: {
+          font: { size: 12 },
+          color: '#1F2937',
+          padding: 15,
+        },
+      },
+      title: {
+        display: true,
+        text: 'Suburb Progress Overview',
+        font: { size: 16 },
+        color: '#1F2937',
+        padding: { top: 10, bottom: 10 },
+      },
+      tooltip: {
+        enabled: true,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        titleFont: { size: 12 },
+        bodyFont: { size: 12 },
+        callbacks: {
+          label: (context: any) => `${context.dataset.label}: ${context.parsed.y}%`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: '#1F2937',
+          font: { size: 10 },
+          maxRotation: 45,
+          minRotation: 45,
+          autoSkip: false,
+        },
+        grid: { display: false },
+      },
+      y: {
+        beginAtZero: true,
+        max: 100,
+        ticks: {
+          color: '#1F2937',
+          stepSize: 20,
+          callback: (value: number) => `${value}%`,
+        },
+        grid: {
+          color: 'rgba(0, 0, 0, 0.1)',
+        },
+      },
+    },
   };
 
   if (!user || profile?.role !== 'agent') {
@@ -463,7 +638,7 @@ export function AgentDashboard() {
         </Link>
         <Link to="/reports" className="bg-green-600 text-white p-6 rounded-lg hover:bg-green-700 transition">
           <h2 className="text-xl font-semibold">Reports</h2>
-          <p className="text-green-100">View performance metrics</p>
+          <p className="text-purple-100">View performance metrics</p>
         </Link>
         <Link to="/activity-logger" className="bg-orange-600 text-white p-6 rounded-lg hover:bg-orange-700 transition">
           <h2 className="text-xl font-semibold flex items-center">
@@ -488,6 +663,78 @@ export function AgentDashboard() {
       </div>
 
       <div className="mb-8">
+        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Suburb Progress Plan</h2>
+        <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 mb-6">
+          <div className="flex items-center gap-4 mb-4">
+            <BarChart2 className="w-6 h-6 text-blue-600" />
+            <select
+              value={selectedSuburb || ''}
+              onChange={(e) => setSelectedSuburb(e.target.value || null)}
+              className="p-2 border rounded-lg"
+            >
+              <option value="">Select a suburb</option>
+              {ALLOWED_SUBURBS.map(suburb => (
+                <option key={suburb.name} value={suburb.name}>{suburb.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {suburbProgress.length === 0 ? (
+            <div className="text-center py-4 text-gray-600">
+              No suburb progress data available. Please try refreshing or check your data source.
+            </div>
+          ) : (
+            <div className="mb-6" style={{ height: '300px', position: 'relative' }}>
+              <Bar data={chartData} options={chartOptions} />
+            </div>
+          )}
+
+          {selectedSuburb && suburbProgress.find(p => p.suburb === selectedSuburb) && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className="grid grid-cols-1 md:grid-cols-3 gap-4"
+            >
+              {(() => {
+                const progress = suburbProgress.find(p => p.suburb === selectedSuburb);
+                if (!progress) return null;
+                return (
+                  <>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h3 className="text-lg font-semibold">Listing Progress</h3>
+                      <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                        <div
+                          className="bg-blue-600 h-2.5 rounded-full"
+                          style={{ width: `${(progress.listedProperties / (progress.totalProperties || 1)) * 100}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-2">
+                        {progress.listedProperties}/{progress.totalProperties} ({((progress.listedProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
+                      </p>
+                    </div>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h3 className="text-lg font-semibold">Conversion Rate</h3>
+                      <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                        <div
+                          className="bg-green-600 h-2.5 rounded-full"
+                          style={{ width: `${progress.conversionRate}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-2">{progress.conversionRate.toFixed(1)}%</p>
+                    </div>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h3 className="text-lg font-semibold">Avg Days on Market</h3>
+                      <p className="text-2xl font-bold text-blue-600">{progress.avgDaysOnMarket}</p>
+                      <p className="text-sm text-gray-600">days</p>
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+          )}
+        </div>
+
         <div className="flex items-center gap-2 mb-4">
           <div className="relative flex-grow">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -804,7 +1051,7 @@ export function AgentDashboard() {
                 <div className="flex justify-between items-center mb-2">
                   <h3 className="text-xl font-semibold truncate">
                     {property.street_number && property.street_name
-                      ? `${property.street_number} ${property.street_name}`
+                      ? `${property.street_number} ${property.street_name}` // Fixed: Replaced p.street_name with property.street_name
                       : property.address || 'Unknown Address'}
                   </h3>
                   <div className="relative group/badge">
