@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import { Loader2, Download, ArrowLeft, MapPin, DollarSign, Home, Calendar, Heart } from 'lucide-react';
-import { formatCurrency } from '../utils/formatters';
-import { Property } from '../types/Property';
+import { motion } from 'framer-motion';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { motion } from 'framer-motion';
-import moment from 'moment';
-import { normalizeSuburb } from '../utils/subrubUtils.ts';
-import L, { LatLngTuple } from 'leaflet';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L, { LatLngTuple, LeafletMouseEvent } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { ArrowLeft, Calendar, DollarSign, Download, Heart, Home, Loader2, MapPin } from 'lucide-react';
+import moment from 'moment';
+import { useCallback, useEffect, useState } from 'react';
+import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import { Property } from '../types/Property';
+import { formatCurrency } from '../utils/formatters';
+import { getSuburbCoordinates, normalizeSuburb } from '../utils/suburbUtils';
 
 // Extend Property interface to include latitude and longitude
 interface ExtendedProperty extends Property {
@@ -26,6 +26,21 @@ interface ExtendedProperty extends Property {
     latitude?: number;
     longitude?: number;
   }>;
+  past_records?: Array<{
+    suburb: string;
+    postcode: string;
+    property_type: string;
+    price: number;
+    bedrooms: number;
+    bathrooms: number;
+    car_garage: number;
+    sqm: number;
+    landsize: number;
+    listing_date: string;
+    sale_date: string;
+    status: string;
+    notes: string;
+  }>;
 }
 
 // Helper function to calculate commission
@@ -37,26 +52,8 @@ const calculateCommission = (property: ExtendedProperty): { commissionRate: numb
 };
 
 // Helper function to generate mock coordinates
-const generateMockCoordinates = (suburb: string, street_name: string, index: number = 0): { latitude: number; longitude: number } => {
-  const baseCoords: Record<string, { lat: number; lng: number }> = {
-    'Pullenvale 4069': { lat: -27.522, lng: 152.885 },
-    'Brookfield 4069': { lat: -27.493, lng: 152.897 },
-    'Anstead 4070': { lat: -27.538, lng: 152.861 },
-    'Chapell Hill 4069': { lat: -27.502, lng: 152.971 },
-    'Kenmore 4069': { lat: -27.507, lng: 152.939 },
-    'Kenmore Hills 4069': { lat: -27.502, lng: 152.929 },
-    'Fig Tree Pocket 4069': { lat: -27.529, lng: 152.961 },
-    'Pinjara Hills 4069': { lat: -27.537, lng: 152.906 },
-    'Moggill 4070': { lat: -27.570, lng: 152.874 },
-    'Bellbowrie 4070': { lat: -27.559, lng: 152.886 },
-  };
-  const normalizedSuburb = normalizeSuburb(suburb);
-  const base = baseCoords[normalizedSuburb] || { lat: -27.467, lng: 153.028 }; // Default to Brisbane CBD
-  const offset = index * 0.0005;
-  return {
-    latitude: base.lat + offset,
-    longitude: base.lng + offset,
-  };
+const generateMockCoordinates = (suburb: string | undefined, street_name: string | undefined, index: number = 0): { latitude: number; longitude: number } => {
+  return getSuburbCoordinates(suburb || 'UNKNOWN', street_name || '', index);
 };
 
 // Helper function to generate PDF report
@@ -115,7 +112,7 @@ const generatePDFReport = async (
   });
 
   // Same Street Sales Section
-  if (options.includeSameStreetSales && property.same_street_sales?.length > 0) {
+  if (options.includeSameStreetSales && property.same_street_sales?.length) {
     doc.setFontSize(16);
     const finalY = (doc as any).lastAutoTable.finalY || 60;
     doc.text('Comparable Sales (Same Street)', 20, finalY + 10);
@@ -137,7 +134,7 @@ const generatePDFReport = async (
   }
 
   // Past Records Section
-  if (options.includePastRecords && property.past_records?.length > 0) {
+  if (options.includePastRecords && property.past_records?.length) {
     doc.setFontSize(16);
     const finalY = (doc as any).lastAutoTable.finalY || 60;
     doc.text('Past Records', 20, finalY + 10);
@@ -145,7 +142,7 @@ const generatePDFReport = async (
       startY: finalY + 20,
       head: [['Location', 'Type', 'Price', 'Beds', 'Baths', 'Garage', 'Floor Area', 'Land Size', 'Listing Date', 'Sale Date', 'Status', 'Notes']],
       body: property.past_records.map((record) => [
-        `${normalizeSuburb(record.suburb)}`,
+        normalizeSuburb(record.suburb),
         record.property_type || 'N/A',
         record.price ? formatCurrency(record.price) : 'N/A',
         record.bedrooms ?? 'N/A',
@@ -167,7 +164,7 @@ const generatePDFReport = async (
   // Footer
   doc.setFontSize(8);
   doc.text(
-    'xAI Property Management - Confidential Report',
+    'Red Tulip Property Management - Confidential Report',
     doc.internal.pageSize.width / 2,
     doc.internal.pageSize.height - 10,
     { align: 'center' }
@@ -179,18 +176,15 @@ const generatePDFReport = async (
 // Zoom Controls Component
 function ZoomControls() {
   const map = useMap();
-  const [zoom, setZoom] = useState(map.getZoom());
 
   const handleZoomIn = useCallback(() => {
     console.log('Zooming in');
     map.zoomIn();
-    setZoom(map.getZoom() + 1);
   }, [map]);
 
   const handleZoomOut = useCallback(() => {
     console.log('Zooming out');
     map.zoomOut();
-    setZoom(map.getZoom() - 1);
   }, [map]);
 
   return (
@@ -225,11 +219,12 @@ function ZoomControls() {
 const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => {
   const [showSalesMarkers, setShowSalesMarkers] = useState(true);
 
-  if (!property.latitude || !property.longitude) {
-    return <p className="text-gray-500 text-center py-4">Map unavailable: No coordinates provided.</p>;
-  }
+  // Generate coordinates if missing
+  const coords = property.latitude && property.longitude
+    ? { latitude: property.latitude, longitude: property.longitude }
+    : generateMockCoordinates(property.suburb, property.street_name);
 
-  const center: LatLngTuple = [property.latitude, property.longitude];
+  const center: LatLngTuple = [coords.latitude, coords.longitude];
 
   // Custom icons
   const mainIcon = L.divIcon({
@@ -251,8 +246,9 @@ const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => 
     return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${coords[0]},${coords[1]}&fov=80&pitch=0`;
   };
 
-  // Generate Static Street View Image URL (placeholder)
+  // Generate Static Street View Image URL
   const getStaticStreetViewUrl = (coords: LatLngTuple) => {
+    // TODO: Replace YOUR_API_KEY with a valid Google Maps API key
     return `https://maps.googleapis.com/maps/api/streetview?size=200x100&location=${coords[0]},${coords[1]}&fov=80&pitch=0&key=YOUR_API_KEY`;
   };
 
@@ -290,8 +286,8 @@ const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => 
           position={center}
           icon={mainIcon}
           eventHandlers={{
-            mouseover: (e) => e.target.openPopup(),
-            mouseout: (e) => e.target.closePopup(),
+            mouseover: (e: LeafletMouseEvent) => e.target.openPopup(),
+            mouseout: (e: LeafletMouseEvent) => e.target.closePopup(),
           }}
         >
           <Popup>
@@ -331,8 +327,8 @@ const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => 
                 position={coords}
                 icon={saleIcon}
                 eventHandlers={{
-                  mouseover: (e) => e.target.openPopup(),
-                  mouseout: (e) => e.target.closePopup(),
+                  mouseover: (e: LeafletMouseEvent) => e.target.openPopup(),
+                  mouseout: (e: LeafletMouseEvent) => e.target.closePopup(),
                 }}
               >
                 <Popup>
@@ -373,7 +369,7 @@ export function PropertyDetail() {
   const [property, setProperty] = useState<ExtendedProperty | null>(location.state?.property || null);
   const [loading, setLoading] = useState(!location.state?.property);
   const [error, setError] = useState<string | null>(null);
-  const [isLiked, setIsLiked] = useState(false); // State for Like button
+  const [isLiked, setIsLiked] = useState(false);
 
   useEffect(() => {
     console.log('PropertyDetail - ID:', id, 'State property:', property, 'Location state:', location.state);
@@ -390,13 +386,13 @@ export function PropertyDetail() {
       const normalizedProperty: ExtendedProperty = {
         ...property,
         suburb: normalizeSuburb(property.suburb),
-        latitude: property.latitude || generateMockCoordinates(property.suburb, property.street_name || '').latitude,
-        longitude: property.longitude || generateMockCoordinates(property.suburb, property.street_name || '').longitude,
+        latitude: property.latitude || generateMockCoordinates(property.suburb, property.street_name).latitude,
+        longitude: property.longitude || generateMockCoordinates(property.suburb, property.street_name).longitude,
         same_street_sales: property.same_street_sales?.map((sale, index) => ({
           ...sale,
           suburb: normalizeSuburb(sale.suburb),
-          latitude: sale.latitude || generateMockCoordinates(sale.suburb, property.street_name || '', index + 1).latitude,
-          longitude: sale.longitude || generateMockCoordinates(sale.suburb, property.street_name || '', index + 1).longitude,
+          latitude: sale.latitude || generateMockCoordinates(sale.suburb, property.street_name, index + 1).latitude,
+          longitude: sale.longitude || generateMockCoordinates(sale.suburb, property.street_name, index + 1).longitude,
         })),
       };
       setProperty(normalizedProperty);
@@ -497,7 +493,7 @@ export function PropertyDetail() {
 
   const handleLike = () => {
     setIsLiked(!isLiked);
-    console.log(`Property ${property?.id} at 16 Nara Street, Kenmore QLD 4069 ${isLiked ? 'unliked' : 'liked'}`);
+    console.log(`Property ${property?.id} at ${property?.street_number || 'N/A'} ${property?.street_name || 'N/A'}, ${normalizeSuburb(property?.suburb)} ${isLiked ? 'unliked' : 'liked'}`);
     // TODO: Add backend logic (e.g., save to Supabase) if needed
   };
 
@@ -510,12 +506,11 @@ export function PropertyDetail() {
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5 }}
         >
-          {/* Logo with Rotating Ring */}
           <div className="relative">
             <motion.div
               className="absolute inset-0 border-4 border-t-blue-600 border-r-blue-600 border-b-transparent border-l-transparent rounded-full"
               animate={{ rotate: 360 }}
-              transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+              transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
               style={{ width: '80px', height: '80px' }}
             />
             <motion.div
@@ -526,7 +521,6 @@ export function PropertyDetail() {
               <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
             </motion.div>
           </div>
-          {/* Loading Text with Bounce */}
           <motion.span
             className="mt-4 text-lg font-semibold text-gray-800"
             initial={{ opacity: 0, y: 20 }}
@@ -601,7 +595,6 @@ export function PropertyDetail() {
         </div>
       </div>
 
-      {/* Map Section */}
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-2 flex items-center">
           <MapPin className="w-5 h-5 mr-2 text-blue-600" />
@@ -674,7 +667,7 @@ export function PropertyDetail() {
         </div>
       </div>
 
-      {property.features?.length > 0 && (
+      {property.features?.length ? (
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Features</h2>
           <ul className="list-disc pl-5">
@@ -683,9 +676,9 @@ export function PropertyDetail() {
             ))}
           </ul>
         </div>
-      )}
+      ) : null}
 
-      {property.same_street_sales?.length > 0 && (
+      {property.same_street_sales?.length ? (
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Comparable Sales (Same Street)</h2>
           <div className="overflow-x-auto">
@@ -715,9 +708,9 @@ export function PropertyDetail() {
             </table>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {property.past_records?.length > 0 && (
+      {property.past_records?.length ? (
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Past Records</h2>
           <div className="overflow-x-auto">
@@ -741,7 +734,7 @@ export function PropertyDetail() {
               <tbody>
                 {property.past_records.map((record, index) => (
                   <tr key={index}>
-                    <td className="px-4 py-2 border">{`${normalizeSuburb(record.suburb)}`}</td>
+                    <td className="px-4 py-2 border">{normalizeSuburb(record.suburb)}</td>
                     <td className="px-4 py-2 border">{record.property_type || 'N/A'}</td>
                     <td className="px-4 py-2 border">{record.price ? formatCurrency(record.price) : 'N/A'}</td>
                     <td className="px-4 py-2 border">{record.bedrooms ?? 'N/A'}</td>
@@ -763,7 +756,7 @@ export function PropertyDetail() {
             </table>
           </div>
         </div>
-      )}
+      ) : null}
 
       <button
         onClick={() => navigate(-1)}

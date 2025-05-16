@@ -12,25 +12,25 @@ import {
   Tooltip,
 } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
-import moment from 'moment';
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Bar, Pie } from 'react-chartjs-2';
-import { useLocation } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import { debounce } from 'lodash';
-import { toast } from 'react-toastify';
+import { motion } from 'framer-motion';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { useAuthStore } from '../store/authStore';
-import { Loader2, Trash2, Edit, Download, FileText, BarChart, X, Gauge, RefreshCcw, ChevronDown, Circle, Filter } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { debounce } from 'lodash';
+import { BarChart, ChevronDown, Download, Filter, Gauge, Loader2, RefreshCcw } from 'lucide-react';
+import moment from 'moment';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Bar } from 'react-chartjs-2';
 import { ErrorBoundary } from 'react-error-boundary';
+import { useLocation } from 'react-router-dom';
 import Select from 'react-select';
-import { motion } from 'framer-motion';
-import { EditModal } from './EditModal';
+import { toast } from 'react-toastify';
+import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/authStore';
+import { normalizeSuburb, suburbMap } from '../utils/suburbUtils';
 import { AgentPropertyMap } from './AgentPropertyMap';
 import { CommissionByAgency } from './CommissionByAgency';
-import { Comparisons } from './Comparisons';
+import { EditModal } from './EditModal';
 
 // Register ChartJS components
 ChartJS.register(
@@ -134,49 +134,8 @@ interface Filters {
   streetNumbers: string[];
   agents: string[];
   agency_names: string[];
-  
 }
 
-// Helper function to normalize suburb and postcode
-const normalizeSuburb = (suburb: string | undefined | null): string => {
-  if (!suburb) return 'UNKNOWN';
-  const trimmed = suburb.trim().toLowerCase();
-  const suburbMap: { [key: string]: string } = {
-    'pullenvale': 'PULLENVALE 4069',
-    'pullenvale qld': 'PULLENVALE 4069',
-    'pullenvale qld (4069)': 'PULLENVALE 4069',
-    'brookfield': 'BROOKFIELD 4069',
-    'brookfield qld': 'BROOKFIELD 4069',
-    'brookfield qld (4069)': 'BROOKFIELD 4069',
-    'anstead': 'ANSTEAD 4070',
-    'anstead qld': 'ANSTEAD 4070',
-    'anstead qld (4070)': 'ANSTEAD 4070',
-    'chapel hill': 'CHAPEL HILL 4069',
-    'chapel hill qld': 'CHAPEL HILL 4069',
-    'chapell hill qld (4069)': 'CHAPEL HILL 4069',
-    'kenmore': 'KENMORE 4069',
-    'kenmore qld': 'KENMORE 4069',
-    'kenmore qld (4069)': 'KENMORE 4069',
-    'kenmore hills': 'KENMORE HILLS 4069',
-    'kenmore hills qld': 'KENMORE HILLS 4069',
-    'kenmore hills qld (4069)': 'KENMORE HILLS 4069',
-    'fig tree pocket': 'FIG TREE POCKET 4069',
-    'fig tree pocket qld': 'FIG TREE POCKET 4069',
-    'fig tree pocket qld (4069)': 'FIG TREE POCKET 4069',
-    'pinjarra hills': 'PINJARRA HILLS 4069',
-    'pinjarra hills qld': 'PINJARRA HILLS 4069',
-    'pinjarra hills qld (4069)': 'PINJARRA HILLS 4069',
-    'moggill': 'MOGGILL QLD (4070)',
-    'moggill qld': 'MOGGILL QLD (4070)',
-    'moggill qld (4070)': 'MOGGILL QLD (4070)',
-    'bellbowrie': 'BELLBOWRIE QLD (4070)',
-    'bellbowrie qld': 'BELLBOWRIE QLD (4070)',
-    'bellbowrie qld (4070)': 'BELLBOWRIE QLD (4070)',
-  };
-  const normalized = suburbMap[trimmed] || trimmed;
-  console.log(`Normalizing suburb: ${suburb} -> ${normalized.toUpperCase()}`);
-  return normalized.toUpperCase();
-};
 // Helper functions
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(value);
@@ -274,7 +233,6 @@ export function Reports() {
     agents: '',
     agency_names: '',
   });
-  const filter = filters;
   const [filterSuggestions, setFilterSuggestions] = useState({
     suburbs: [] as string[],
     streetNames: [] as string[],
@@ -313,15 +271,19 @@ export function Reports() {
     updateFilterSuggestions(properties);
   }, [properties]);
 
-  // Update filter suggestions
+  // Helper function to update filter suggestions
   const updateFilterSuggestions = (data: PropertyDetails[]) => {
-    const uniqueSuburbs = [...new Set(data.map((p) => normalizeSuburb(p.suburb)).filter(Boolean))].sort();
+    // Derive valid suburbs from suburbMap
+    const validSuburbs = [...new Set(Object.values(suburbMap))].sort();
+    // Filter properties to include only valid suburbs
+    const uniqueSuburbs = [...new Set(data.map((p) => normalizeSuburb(p.suburb)).filter((suburb) => validSuburbs.includes(suburb)))].sort();
+
     const newSuggestions = {
-      suburbs: uniqueSuburbs,
+      suburbs: validSuburbs,
       streetNames: [...new Set(data.map((p) => p.street_name || '').filter(Boolean))].sort(),
       streetNumbers: [...new Set(data.map((p) => p.street_number || '').filter(Boolean))].sort(),
       agents: [...new Set(data.map((p) => p.agent_name || '').filter(Boolean))].sort(),
-      agency_names: [...new Set(data.map((p) => p.agency_name || 'Unknown').filter(Boolean))].sort(),
+      agency_names: [...new Set(data.map((p) => p.agency_name || 'UNKNOWN').filter(Boolean))].sort(),
     };
     console.log('Updated filter suggestions:', newSuggestions);
     setFilterSuggestions(newSuggestions);
@@ -352,7 +314,7 @@ export function Reports() {
       setLoading(false);
       setError('Please log in to view reports');
     }
-  }, [user]);
+  }, [user]); // Fixed: Removed semicolon
 
   // Update filter preview count
   const updateFilterPreview = useCallback(() => {
@@ -407,11 +369,15 @@ export function Reports() {
       if (propError) throw new Error(`Property fetch error: ${propError.message}`);
       console.log('Raw properties fetched from Supabase:', propData.length, propData.map(p => ({ id: p.id, suburb: p.suburb })));
 
-      // Normalize suburbs
-      const normalizedPropData = propData.map((prop) => ({
-        ...prop,
-        suburb: normalizeSuburb(prop.suburb),
-      }));
+      // Normalize suburbs with debugging
+      const normalizedPropData = propData.map((prop) => {
+        const normalized = normalizeSuburb(prop.suburb);
+        console.log(`Raw suburb: ${prop.suburb} -> Normalized: ${normalized}`);
+        return {
+          ...prop,
+          suburb: normalized,
+        };
+      });
       console.log('Normalized properties:', normalizedPropData.length);
 
       // Log unique suburbs
@@ -510,9 +476,11 @@ export function Reports() {
     setFilteredProperties(filtered);
     debouncedGenerateMetrics(filtered);
   };
+
   const handleGenerateMetrics = () => {
     debouncedGenerateMetrics(properties);
   };
+
   const handleFilterChange = (filterType: keyof Filters, selected: any) => {
     const newValues = selected ? selected.map((option: any) => option.value) : [];
     console.log(`Filter changed: ${filterType} =`, newValues);
@@ -537,12 +505,12 @@ export function Reports() {
       if (value) {
         console.log(`Adding manual input for ${filterType}: ${value}`);
         setFilters((prev) => {
-  const newValues = [...new Set([...prev[filterType], value])];
-  const newFilters: Filters = { ...prev, [filterType]: newValues };
-  applyFilters(newFilters);
-  localStorage.setItem('reportFilters', JSON.stringify(newFilters));
-  return newFilters;
-});
+          const newValues = [...new Set([...prev[filterType], value])];
+          const newFilters: Filters = { ...prev, [filterType]: newValues };
+          applyFilters(newFilters);
+          localStorage.setItem('reportFilters', JSON.stringify(newFilters));
+          return newFilters;
+        });
         setManualInputs((prev) => ({ ...prev, [filterType]: '' }));
         toast.success(`Added ${filterType.replace(/s$/, '')}: ${value}`);
       } else {
@@ -621,14 +589,6 @@ export function Reports() {
       let totalListings = 0;
       let totalSales = 0;
       let totalPriceSum = 0;
-
-      // New metrics for Comparisons
-    const listingsByAgentBySuburb: Record<string, Record<string, number>> = {};
-    const topListersBySuburb: Record<string, TopLister> = {};
-    const ourListingsBySuburb: Record<string, number> = {};
-    const commissionByAgent: Record<string, number> = {};
-    const salesByAgent: Record<string, number> = {};
-    const salesByAgency: Record<string, number> = {};
 
       data.forEach((prop) => {
         const suburb = normalizeSuburb(prop.suburb);
@@ -1321,7 +1281,10 @@ export function Reports() {
                       />
                       <Select
                         isMulti
-                        options={filterSuggestions[filterType].map((item) => ({ value: item, label: item }))}
+                        options={filterSuggestions[filterType].map((item) => ({
+                          value: item,
+                          label: item,
+                        }))}
                         value={filters[filterType].map((item) => ({ value: item, label: item }))}
                         onChange={(selected) => handleFilterChange(filterType, selected)}
                         placeholder={`Select ${filterType === 'agency_names' ? 'agency name' : filterType.replace(/s$/, '')}...`}
@@ -1431,7 +1394,7 @@ export function Reports() {
                             >
                               <td className="p-4 text-gray-700">{property.street_number || 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.street_name || 'N/A'}</td>
-                              <td className="p-4 text-gray-700">{normalizeSuburb(property.suburb)}</td>
+                              <td className="p-4 text-gray-700">{normalizeSuburb(property.suburb) || 'UNKNOWN'}</td>
                               <td className="p-4 text-gray-700">{property.postcode || 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.agent_name || 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.property_type || 'N/A'}</td>
@@ -1446,7 +1409,7 @@ export function Reports() {
                               <td className="p-4 text-gray-700">{property.bedrooms ?? 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.bathrooms ?? 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.car_garage ?? 'N/A'}</td>
-                              <td className="p-4 text-grey-700">{property.sqm ?? 'N/A'}</td>
+                              <td className="p-4 text-gray-700">{property.sqm ?? 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.landsize ?? 'N/A'}</td>
                               <td className="p-4 text-gray-700">{formatDate(property.listed_date)}</td>
                               <td className="p-4 text-gray-700">{formatDate(property.sold_date)}</td>
@@ -1454,25 +1417,16 @@ export function Reports() {
                               <td className="p-4 text-gray-700">{property.bushfire_risk || 'N/A'}</td>
                               <td className="p-4 text-gray-700">{property.contract_status || 'N/A'}</td>
                               <td className="p-4 text-gray-700">{formatArray(property.features)}</td>
-                              <td className="p-4">
+                              <td className="p-4 text-gray-700">
                                 <motion.button
                                   onClick={() => {
                                     setSelectedProperty(property);
                                     setShowEditModal(true);
                                   }}
-                                  className="flex items-center px-4 py-1 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white rounded-full hover:from-yellow-600 hover:to-yellow-700 transition-all"
-                                  aria-label={`Edit property ${property.street_number || ''} ${property.street_name || ''}`}
+                                  className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
                                   whileHover={{ scale: 1.05 }}
                                   whileTap={{ scale: 0.95 }}
                                 >
-                                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth="2"
-                                      d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                                    />
-                                  </svg>
                                   Edit
                                 </motion.button>
                               </td>
@@ -1483,7 +1437,7 @@ export function Reports() {
                     </table>
                   </div>
                 ) : (
-                  <p className="text-gray-500 text-center py-4">No properties found matching the current filters.</p>
+                  <p className="text-gray-500 text-center">No properties match found matching the current filters.</p>
                 )}
               </motion.div>
               <motion.div

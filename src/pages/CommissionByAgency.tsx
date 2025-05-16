@@ -17,7 +17,7 @@ import { toast } from 'react-toastify';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { Download, BarChart, ChevronLeft, ChevronRight, Home, Building2 } from 'lucide-react';
+import { Download, BarChart, ChevronLeft, ChevronRight, Home, Building2, User } from 'lucide-react';
 
 // Register ChartJS components
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend);
@@ -26,6 +26,7 @@ interface CommissionSummary {
   totalCommission: number;
   totalProperties: number;
   topAgency: string;
+  topAgent: { name: string; commission: number };
   agencyPropertyCounts: Record<string, number>;
 }
 
@@ -33,6 +34,7 @@ interface AgencyTotal {
   agency: string;
   totalCommission: number;
   propertyCount: number;
+  suburbs: string[];
 }
 
 // Helper function to calculate commission
@@ -48,6 +50,51 @@ const normalizeAgencyName = (agency: string | undefined | null): string => {
   if (!agency) return '';
   const trimmed = agency.trim();
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+};
+
+// Helper function to normalize agent name
+const normalizeAgentName = (agent: string | undefined | null): string => {
+  if (!agent) return 'Unknown';
+  return agent.trim();
+};
+
+// Helper function to normalize suburb name
+const normalizeSuburbName = (suburb: string | undefined | null): string => {
+  if (!suburb) return 'Unknown';
+  const trimmed = suburb.trim().toLowerCase();
+  const suburbMap: Record<string, string> = {
+    'pullenvale': 'PULLENVALE 4069',
+    'pullenvale qld': 'PULLENVALE 4069',
+    'pullenvale qld (4069)': 'PULLENVALE 4069',
+    'brookfield': 'BROOKFIELD 4069',
+    'brookfield qld': 'BROOKFIELD 4069',
+    'brookfield qld (4069)': 'BROOKFIELD 4069',
+    'anstead': 'ANSTEAD 4070',
+    'anstead qld': 'ANSTEAD 4070',
+    'anstead qld (4070)': 'ANSTEAD 4070',
+    'chapel hill': 'CHAPEL HILL 4069',
+    'chapel hill qld': 'CHAPEL HILL 4069',
+    'chapell hill qld (4069)': 'CHAPEL HILL 4069',
+    'kenmore': 'KENMORE 4069',
+    'kenmore qld': 'KENMORE 4069',
+    'kenmore qld (4069)': 'KENMORE 4069',
+    'kenmore hills': 'KENMORE HILLS 4069',
+    'kenmore hills qld': 'KENMORE HILLS 4069',
+    'kenmore hills qld (4069)': 'KENMORE HILLS 4069',
+    'fig tree pocket': 'FIG TREE POCKET 4069',
+    'fig tree pocket qld': 'FIG TREE POCKET 4069',
+    'fig tree pocket qld (4069)': 'FIG TREE POCKET 4069',
+    'pinjarra hills': 'PINJARRA HILLS 4069',
+    'pinjarra hills qld': 'PINJARRA HILLS 4069',
+    'pinjarra hills qld (4069)': 'PINJARRA HILLS 4069',
+    'moggill': 'MOGGILL QLD (4070)',
+    'moggill qld': 'MOGGILL QLD (4070)',
+    'moggill qld (4070)': 'MOGGILL QLD (4070)',
+    'bellbowrie': 'BELLBOWRIE QLD (4070)',
+    'bellbowrie qld': 'BELLBOWRIE QLD (4070)',
+    'bellbowrie qld (4070)': 'BELLBOWRIE QLD (4070)',
+  };
+  return suburbMap[trimmed] || 'Unknown';
 };
 
 export default function CommissionByAgency() {
@@ -103,9 +150,11 @@ export default function CommissionByAgency() {
     let topAgency = '';
     let maxCommission = 0;
     const agencyPropertyCounts: Record<string, number> = {};
+    const agentCommissions: Record<string, number> = {};
+    let topAgent = { name: 'Unknown', commission: 0 };
 
     if (!internalCommissionData || !internalProperties) {
-      return { totalCommission, totalProperties, topAgency, agencyPropertyCounts };
+      return { totalCommission, totalProperties, topAgency, topAgent, agencyPropertyCounts };
     }
 
     Object.keys(internalCommissionData).forEach((agency) => {
@@ -115,6 +164,7 @@ export default function CommissionByAgency() {
     internalProperties.forEach((property, index) => {
       const rawAgency = property.agency_name;
       const agency = normalizeAgencyName(rawAgency);
+      const agent = normalizeAgentName(property.agent_name);
       const { commissionEarned } = calculateCommission(property);
 
       if (agency && internalCommissionData.hasOwnProperty(agency)) {
@@ -122,6 +172,10 @@ export default function CommissionByAgency() {
         totalProperties += 1;
         if (commissionEarned > 0) {
           totalCommission += commissionEarned;
+          agentCommissions[agent] = (agentCommissions[agent] || 0) + commissionEarned;
+          if (agentCommissions[agent] > topAgent.commission) {
+            topAgent = { name: agent, commission: agentCommissions[agent] };
+          }
         }
       } else {
         console.warn(`Property ${index} skipped:`, {
@@ -141,22 +195,34 @@ export default function CommissionByAgency() {
       }
     });
 
-    return { totalCommission, totalProperties, topAgency, agencyPropertyCounts };
+    return { totalCommission, totalProperties, topAgency, topAgent, agencyPropertyCounts };
   }, [internalCommissionData, internalProperties]);
 
   const summary = calculateSummary();
 
-  // Calculate agency totals with property counts
+  // Calculate agency totals with property counts and suburbs
   const agencyTotals = useMemo<AgencyTotal[]>(() => {
     if (!internalCommissionData) return [];
+    const agencySuburbsMap: Record<string, Set<string>> = {};
+
+    internalProperties.forEach((property) => {
+      const agency = normalizeAgencyName(property.agency_name);
+      const suburb = normalizeSuburbName(property.suburb);
+      if (agency && suburb !== 'Unknown') {
+        agencySuburbsMap[agency] = agencySuburbsMap[agency] || new Set();
+        agencySuburbsMap[agency].add(suburb);
+      }
+    });
+
     return Object.entries(internalCommissionData)
       .map(([agency, types]) => ({
         agency,
         totalCommission: Object.values(types).reduce((sum, val) => sum + val, 0),
         propertyCount: summary.agencyPropertyCounts[agency] || 0,
+        suburbs: Array.from(agencySuburbsMap[agency] || []),
       }))
       .sort((a, b) => b.totalCommission - a.totalCommission);
-  }, [internalCommissionData, summary.agencyPropertyCounts]);
+  }, [internalCommissionData, internalProperties, summary.agencyPropertyCounts]);
 
   // Get top 5 agencies for chart
   const topFiveAgencies = useMemo(() => {
@@ -239,11 +305,12 @@ export default function CommissionByAgency() {
 
     autoTable(doc, {
       startY: 50,
-      head: [['Agency', 'Total Commission', 'Property Count']],
+      head: [['Agency', 'Total Commission', 'Property Count', 'Suburbs']],
       body: agencyTotals.map((row) => [
         row.agency,
         formatCurrency(row.totalCommission),
         row.propertyCount,
+        row.suburbs.join(', ') || 'None',
       ]),
       theme: 'striped',
       headStyles: { fillColor: '#FF6384', textColor: '#fff' },
@@ -261,8 +328,8 @@ export default function CommissionByAgency() {
       ['Generated by xAI Property Management'],
       [],
       ['Agency Totals'],
-      ['Agency', 'Total Commission', 'Property Count'],
-      ...agencyTotals.map((row) => [row.agency, formatCurrency(row.totalCommission), row.propertyCount]),
+      ['Agency', 'Total Commission', 'Property Count', 'Suburbs'],
+      ...agencyTotals.map((row) => [row.agency, formatCurrency(row.totalCommission), row.propertyCount, row.suburbs.join(', ') || 'None']),
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(data);
@@ -339,29 +406,46 @@ export default function CommissionByAgency() {
             {summary.totalProperties} Total Properties
           </motion.div>
         </div>
-        {summary.topAgency && agencyTotals[0] && (
-          <div className="text-right space-y-2">
-            <p className="text-lg font-semibold">Top Agency</p>
-            <motion.span
-              className="inline-flex items-center px-3 py-1 bg-yellow-400 text-yellow-900 rounded-full text-sm font-semibold"
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1, rotate: [0, 5, -5, 0] }}
-              transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
-            >
-              {summary.topAgency}
-            </motion.span>
-            <p className="text-sm">{formatCurrency(agencyTotals[0].totalCommission)}</p>
-            <motion.div
-              className="inline-flex items-center px-3 py-1 bg-blue-400 text-blue-900 rounded-full text-sm font-semibold"
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1, opacity: [0.8, 1, 0.8] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-            >
-              <Building2 className="w-4 h-4 mr-1" />
-              {agencyTotals[0].propertyCount} Properties
-            </motion.div>
-          </div>
-        )}
+        <div className="text-right space-y-2">
+          {summary.topAgency && agencyTotals[0] && (
+            <>
+              <p className="text-lg font-semibold">Top Agency</p>
+              <motion.span
+                className="inline-flex items-center px-3 py-1 bg-yellow-400 text-yellow-900 rounded-full text-sm font-semibold"
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1, rotate: [0, 5, -5, 0] }}
+                transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+              >
+                {summary.topAgency}
+              </motion.span>
+              <p className="text-sm">{formatCurrency(agencyTotals[0].totalCommission)}</p>
+              <motion.div
+                className="inline-flex items-center px-3 py-1 bg-blue-400 text-blue-900 rounded-full text-sm font-semibold"
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1, opacity: [0.8, 1, 0.8] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                <Building2 className="w-4 h-4 mr-1" />
+                {agencyTotals[0].propertyCount} Properties
+              </motion.div>
+            </>
+          )}
+          {summary.topAgent.name !== 'Unknown' && (
+            <>
+              <p className="text-lg font-semibold mt-4">Top Agent</p>
+              <motion.span
+                className="inline-flex items-center px-3 py-1 bg-orange-400 text-orange-900 rounded-full text-sm font-semibold"
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1, rotate: [0, 5, -5, 0] }}
+                transition={{ duration: 0.5, repeat: Infinity, repeatDelay: 2 }}
+              >
+                <User className="w-4 h-4 mr-1" />
+                {summary.topAgent.name}
+              </motion.span>
+              <p className="text-sm">{formatCurrency(summary.topAgent.commission)}</p>
+            </>
+          )}
+        </div>
       </motion.div>
 
       {/* Agency Totals Table */}
@@ -381,6 +465,7 @@ export default function CommissionByAgency() {
               <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
               <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Commission</th>
               <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Property Count</th>
+              <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Suburbs</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -397,6 +482,7 @@ export default function CommissionByAgency() {
                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.agency}</td>
                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.totalCommission)}</td>
                   <td className="px-4 sm:px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.propertyCount}</td>
+                  <td className="px-4 sm:px-6 py-4 text-sm text-gray-900">{row.suburbs.join(', ') || 'None'}</td>
                 </motion.tr>
               ))}
             </AnimatePresence>
