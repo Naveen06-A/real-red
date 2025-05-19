@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 
+interface User {
+  id: string;
+  email?: string;
+  agent_name?: string;
+  agency_name?: string;
+}
 interface UserProfile {
   name: string;
   phone: string;
@@ -12,7 +18,7 @@ interface AuthState {
   user: { id: string; email?: string } | null;
   profile: UserProfile | null;
   loading: boolean;
-  setUser: (user: any) => void;
+  setUser: (user: User) => void;
   setProfile: (profile: UserProfile) => void;
   initializeAuth: () => Promise<void>;
   fetchProfile: () => Promise<void>;

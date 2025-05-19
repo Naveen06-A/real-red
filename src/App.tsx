@@ -20,7 +20,7 @@ import { ResetPassword } from './components/ResetPassword';
 import { ProgressReportPage } from './pages/ProgressReportPage';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { CommissionByAgency } from './pages/CommissionByAgency';
-import { Comparisons } from './pages/Comparisons';
+import { ComparisonReport } from './pages/Comparisons';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
@@ -98,6 +98,7 @@ function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/agent-register" element={<AgentRegister />} />
             <Route path="/progress-report" element={<ProgressReportPage />} />
+            <Route path="/comparisons" element={<ComparisonReport />} />
             <Route
               path="/agent-dashboard"
               element={

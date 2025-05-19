@@ -1,253 +1,1028 @@
-import { Bar } from 'react-chartjs-2';
-import { ChartOptions } from 'chart.js';
-import { PropertyMetrics } from './types/types';
-import { motion } from 'framer-motion';
-import { formatCurrency } from './Reports'; // Importing formatCurrency from Reports.tsx
+import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, Loader2, RefreshCw, Moon, Sun, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Star } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/authStore';
+import { normalizeSuburb } from '../utils/suburbUtils';
+import { ErrorBoundary } from 'react-error-boundary';
+import { Bar, Doughnut } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { utils, writeFile } from 'xlsx';
 
-interface ComparisonsProps {
-  propertyMetrics: PropertyMetrics | null;
-  isLoading: boolean;
-}
+// Register Chart.js components
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
-export function Comparisons({ propertyMetrics, isLoading }: ComparisonsProps) {
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center py-8">
-        <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-      </div>
-    );
-  }
+// Debug flag
+const DEBUG = true;
 
-  if (!propertyMetrics) {
-    return <p className="text-gray-500 text-center py-4">No comparison data available.</p>;
-  }
-
-  // Helper function to format numbers
-  const formatNumber = (value: number) => value.toLocaleString();
-
-  // 1. Top Listers by Suburb vs Our Position
-  const renderTopListersBySuburb = () => {
-    const suburbs = Object.keys(propertyMetrics.topListersBySuburb);
-    const tableData = suburbs.map((suburb) => ({
-      suburb,
-      topLister: propertyMetrics.topListersBySuburb[suburb].agent,
-      topListerCount: propertyMetrics.topListersBySuburb[suburb].count,
-      ourListings: propertyMetrics.ourListingsBySuburb[suburb] || 0,
-    }));
-
-    return (
-      <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          Top Listers by Suburb vs Our Position
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white">
-                <th className="p-4 text-left text-sm font-semibold">Suburb</th>
-                <th className="p-4 text-left text-sm font-semibold">Top Lister</th>
-                <th className="p-4 text-left text-sm font-semibold">Top Lister Count</th>
-                <th className="p-4 text-left text-sm font-semibold">Our Listings</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.map((row, index) => (
-                <motion.tr
-                  key={row.suburb}
-                  className="border-b border-gray-200 hover:bg-gray-50 transition-colors"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.3, delay: index * 0.1 }}
-                >
-                  <td className="p-4 text-gray-700">{row.suburb}</td>
-                  <td className="p-4 text-gray-700">{row.topLister || 'N/A'}</td>
-                  <td className="p-4 text-gray-700">{formatNumber(row.topListerCount)}</td>
-                  <td className="p-4 text-gray-700">{formatNumber(row.ourListings)}</td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </motion.div>
-    );
-  };
-
-  // 2. Highest-Earning Agents by Commission vs Our Performance
-  const renderCommissionComparison = () => {
-    const labels = [...propertyMetrics.topCommissionEarners.map(e => e.agent), propertyMetrics.ourAgentStats.name];
-    const data = [...propertyMetrics.topCommissionEarners.map(e => e.commission), propertyMetrics.ourCommission];
-
-    const commissionData = {
-      labels,
-      datasets: [
-        {
-          label: 'Commission Earned',
-          data,
-          backgroundColor: [...Array(propertyMetrics.topCommissionEarners.length).fill('#36A2EB'), '#FF6384'],
-        },
-      ],
-    };
-
-    const options: ChartOptions<'bar'> = {
-      plugins: {
-        legend: { position: 'top', labels: { font: { size: 14 } } },
-        title: { display: true, text: 'Top Commission Earners vs Our Performance', font: { size: 18, weight: 'bold' } },
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.dataset.label}: ${formatCurrency(context.raw as number)}`,
-          },
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { callback: (value) => formatCurrency(value as number), font: { size: 12 } },
-        },
-        x: { ticks: { font: { size: 12 } } },
-      },
-    };
-
-    return (
-      <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Top Commission Earners vs Our Performance
-        </h3>
-        <Bar data={commissionData} options={options} />
-      </motion.div>
-    );
-  };
-
-  // 3. Leading Individual Agents vs Our Results
-  const renderAgentSalesComparison = () => {
-    const labels = [...propertyMetrics.topAgents.map(a => a.name), propertyMetrics.ourAgentStats.name];
-    const data = [...propertyMetrics.topAgents.map(a => a.sales), propertyMetrics.ourAgentStats.sales];
-
-    const agentData = {
-      labels,
-      datasets: [
-        {
-          label: 'Sales Count',
-          data,
-          backgroundColor: [...Array(propertyMetrics.topAgents.length).fill('#36A2EB'), '#FF6384'],
-        },
-      ],
-    };
-
-    const options: ChartOptions<'bar'> = {
-      plugins: {
-        legend: { position: 'top', labels: { font: { size: 14 } } },
-        title: { display: true, text: 'Top Agents by Sales vs Our Performance', font: { size: 18, weight: 'bold' } },
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.dataset.label}: ${formatNumber(context.raw as number)}`,
-          },
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { font: { size: 12 } },
-        },
-        x: { ticks: { font: { size: 12 } } },
-      },
-    };
-
-    return (
-      <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a2 2 0 00-2-2h-3m-2 4h-5v-2a2 2 0 012-2h3m-2-4H7a2 2 0 00-2 2v2h5m2-4h5V7a2 2 0 00-2-2h-3m2 4H7" />
-          </svg>
-          Top Agents by Sales vs Our Performance
-        </h3>
-        <Bar data={agentData} options={options} />
-      </motion.div>
-    );
-  };
-
-  // 4. Top-Selling Agencies vs Our Standings
-  const renderAgencySalesComparison = () => {
-    const labels = [...propertyMetrics.topAgencies.map(a => a.name), propertyMetrics.ourAgencyStats.name];
-    const data = [...propertyMetrics.topAgencies.map(a => a.sales), propertyMetrics.ourAgencyStats.sales];
-
-    const agencyData = {
-      labels,
-      datasets: [
-        {
-          label: 'Sales Count',
-          data,
-          backgroundColor: [...Array(propertyMetrics.topAgencies.length).fill('#36A2EB'), '#FF6384'],
-        },
-      ],
-    };
-
-    const options: ChartOptions<'bar'> = {
-      plugins: {
-        legend: { position: 'top', labels: { font: { size: 14 } } },
-        title: { display: true, text: 'Top Agencies by Sales vs Our Standings', font: { size: 18, weight: 'bold' } },
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.dataset.label}: ${formatNumber(context.raw as number)}`,
-          },
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { font: { size: 12 } },
-        },
-        x: { ticks: { font: { size: 12 } } },
-      },
-    };
-
-    return (
-      <motion.div
-        className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 mb-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-          <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a2 2 0 012-2h2a2 2 0 012 2v5m-4 0h-4" />
-          </svg>
-          Top Agencies by Sales vs Our Standings
-        </h3>
-        <Bar data={agencyData} options={options} />
-      </motion.div>
-    );
-  };
-
+// Error Fallback Component
+const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => {
+  if (DEBUG) console.error('ErrorBoundary caught:', error);
   return (
-    <div className="space-y-8">
-      {renderTopListersBySuburb()}
-      {renderCommissionComparison()}
-      {renderAgentSalesComparison()}
-      {renderAgencySalesComparison()}
+    <div className="flex justify-center items-center h-screen bg-[#BFDBFE] text-[#1E3A8A]">
+      <div className="text-center">
+        <svg className="w-16 h-16 mx-auto mb-4 text-[#1E3A8A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <p className="text-xl font-semibold">Error: {error.message}</p>
+        <button
+          onClick={resetErrorBoundary}
+          className="mt-4 px-6 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+          aria-label="Try again"
+        >
+          Try Again
+        </button>
+      </div>
     </div>
   );
+};
+
+// Interfaces
+interface User {
+  id: string;
+  email?: string;
+  agent_name?: string;
+  agency_name?: string;
 }
+
+interface PropertyDetails {
+  id: string;
+  suburb: string;
+  street_name: string;
+  street_number: string;
+  postcode: string;
+  category: string;
+  agent_name?: string;
+  agency_name?: string;
+  sold_date?: string;
+  latitude?: number;
+  longitude?: number;
+  commission?: number;
+}
+
+interface ComparisonMetrics {
+  harcourtsSuccess: {
+    totalListings: number;
+    totalSold: number;
+    agents: string[];
+    topAgent: { name: string; listings: number; sales: number };
+  };
+  agencyComparison: {
+    agency: string;
+    listedCount: number;
+    soldCount: number;
+    agents: string[];
+  }[];
+  agentComparison: {
+    agent: string;
+    agency: string;
+    listings: number;
+    sales: number;
+  }[];
+  suburbComparison: {
+    suburb: string;
+    topAgency: string;
+    topListings: number;
+    harcourtsListings: number;
+  }[];
+}
+
+interface AgencyCardProps {
+  item: ComparisonMetrics['agencyComparison'][0];
+  index: number;
+  globalIndex: number;
+  maxSold: number;
+  isOurAgency: boolean;
+  comparisonMetrics: ComparisonMetrics | null;
+}
+
+// Theme Toggle Component
+const ThemeToggle: React.FC<{ isDark: boolean; setIsDark: (value: boolean) => void }> = ({ isDark, setIsDark }) => (
+  <button
+    onClick={() => setIsDark(!isDark)}
+    className="p-2 rounded-md bg-[#BFDBFE] dark:bg-[#1E3A8A] text-[#1E3A8A] dark:text-[#BFDBFE] hover:bg-[#3B82F6] hover:text-white transition-colors"
+    aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+  >
+    {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+  </button>
+);
+
+// Progress Circle Component
+const ProgressCircle: React.FC<{ progress: number; label: string }> = ({ progress, label }) => (
+  <div className="relative w-24 h-24">
+    <svg className="w-full h-full" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="45" fill="none" stroke="#BFDBFE" strokeWidth="10" />
+      <motion.circle
+        cx="50"
+        cy="50"
+        r="45"
+        fill="none"
+        stroke="#3B82F6"
+        strokeWidth="10"
+        strokeDasharray="283"
+        strokeDashoffset={283 * (1 - progress / 100)}
+        strokeLinecap="round"
+        initial={{ strokeDashoffset: 283 }}
+        animate={{ strokeDashoffset: 283 * (1 - progress / 100) }}
+        transition={{ duration: 1, ease: 'easeOut' }}
+      />
+    </svg>
+    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center">
+      <p className="text-base font-semibold text-[#1E3A8A]">{Math.round(progress)}%</p>
+      <p className="text-xs text-[#1E3A8A]">{label}</p>
+    </div>
+  </div>
+);
+
+// Collapsible Section Component
+const CollapsibleSection: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  isOpen: boolean;
+  toggleOpen: () => void;
+}> = ({ title, children, isOpen, toggleOpen }) => (
+  <div className="border border-[#E5E7EB] bg-[#FFFFFF] rounded-md p-6">
+    <button
+      onClick={toggleOpen}
+      className="w-full flex justify-between items-center text-xl font-semibold text-[#1E3A8A] mb-4 focus:outline-none"
+    >
+      {title}
+      {isOpen ? <ChevronUp className="w-5 h-5 text-[#3B82F6]" /> : <ChevronDown className="w-5 h-5 text-[#3B82F6]" />}
+    </button>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ blockSize: 0, opacity: 0 }}
+          animate={{ blockSize: 'auto', opacity: 1 }}
+          exit={{ blockSize: 0, opacity: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </div>
+);
+
+// Agency Card Component
+const AgencyCard: React.FC<AgencyCardProps> = ({ item, index, globalIndex, maxSold, isOurAgency, comparisonMetrics }) => {
+  const progress = maxSold > 0 ? (item.soldCount / maxSold) * 100 : 0;
+  const rankPercentile = comparisonMetrics?.agencyComparison?.length
+    ? Math.ceil((globalIndex + 1) / comparisonMetrics.agencyComparison.length * 100)
+    : 100;
+  return (
+    <motion.div
+      className={`p-6 rounded-md border border-[#E5E7EB] relative ${
+        isOurAgency ? 'bg-[#3B82F6] text-white' : 'bg-[#BFDBFE] text-[#1E3A8A]'
+      }`}
+      initial={{ opacity: 0, x: 50 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -50 }}
+      transition={{ duration: 0.3, delay: index * 0.1 }}
+    >
+      {isOurAgency && (
+        <motion.div
+          className="absolute -top-3 -right-3 bg-[#BFDBFE] text-[#1E3A8A] rounded-full p-2 shadow-lg group"
+          animate={{ boxShadow: ['0 0 0 0 rgba(59, 130, 246, 0.5)', '0 0 10px 5px rgba(59, 130, 246, 0.5)', '0 0 0 0 rgba(59, 130, 246, 0.5)'] }}
+          transition={{ duration: 0.8, repeat: Infinity }}
+          aria-label="Our Agency"
+        >
+          <Star className="w-4 h-4" />
+          <div className="absolute hidden group-hover:block bg-[#BFDBFE] text-[#1E3A8A] text-xs rounded p-2 mt-2 right-0">
+            Top {rankPercentile}% in Sales
+          </div>
+        </motion.div>
+      )}
+      <h3 className="text-lg font-semibold">Rank {globalIndex + 1}: {item.agency}</h3>
+      <p className="text-sm mt-2">Agents: {item.agents.join(', ')}</p>
+      <p className="text-sm">Listed: {item.listedCount}</p>
+      <p className="text-sm">Sold: {item.soldCount}</p>
+      <div className="mt-4">
+        <ProgressCircle progress={progress} label="Sales" />
+      </div>
+    </motion.div>
+  );
+};
+
+// Extend jsPDF with autoTable
+interface JsPDFWithAutoTable extends jsPDF {
+  autoTable: typeof autoTable;
+  lastAutoTable: { finalY: number };
+}
+
+// Main Component
+export function ComparisonReport() {
+  const [properties, setProperties] = useState<PropertyDetails[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isDark, setIsDark] = useState(false);
+  const [openSections, setOpenSections] = useState({
+    spotlight: true,
+    agency: true,
+    agent: true,
+    suburb: true,
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+  const { user } = useAuthStore((state: { user: User | null }) => ({ user: state.user }));
+  const navigate = useNavigate();
+  const location = useLocation();
+  const ourAgentName = user?.agent_name || 'Our Agent';
+  const ourAgencyName = 'Harcourts Success';
+
+  // Log component lifecycle
+  if (DEBUG) {
+    console.log('ComparisonReport mounted at', new Date().toISOString());
+    console.log('location.state:', JSON.stringify(location.state, null, 2));
+    console.log('user:', user ? { id: user.id, agent_name: user.agent_name, agency_name: user.agency_name } : 'Not authenticated');
+  }
+
+  // Toggle theme
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [isDark]);
+
+  // Generate mock coordinates
+  const generateMockCoordinates = (suburb: string, streetName: string): { latitude: number; longitude: number } => {
+    const seed = (suburb + streetName).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return {
+      latitude: -33.8688 + (seed % 100) / 1000,
+      longitude: 151.2093 + (seed % 100) / 1000,
+    };
+  };
+
+  // Fetch data
+  const fetchData = useCallback(async () => {
+    if (DEBUG) console.log('fetchData: Starting...');
+    try {
+      setLoading(true);
+      setError(null);
+
+      let data: PropertyDetails[] = [];
+
+      // Check for passed state
+      const passedMetrics = location.state?.propertyMetrics;
+      if (
+        passedMetrics &&
+        passedMetrics.propertyDetails &&
+        Array.isArray(passedMetrics.propertyDetails) &&
+        passedMetrics.propertyDetails.length > 0
+      ) {
+        if (DEBUG) console.log('fetchData: Using passed propertyMetrics:', passedMetrics.propertyDetails.length);
+        data = passedMetrics.propertyDetails
+          .map((prop: PropertyDetails, index: number) => {
+            if (DEBUG) console.log(`fetchData: Processing property[${index}]:`, prop.id || 'No ID');
+            try {
+              if (!prop.id || !prop.suburb || !prop.street_name || !prop.street_number || !prop.postcode || !prop.category) {
+                if (DEBUG) console.warn(`fetchData: Skipping invalid property[${index}]:`, prop);
+                return null;
+              }
+              return {
+                ...prop,
+                suburb: normalizeSuburb(prop.suburb),
+                agent_name: prop.agent_name ?? 'Unknown',
+                agency_name: prop.agency_name ?? 'Unknown',
+                latitude: prop.latitude ?? generateMockCoordinates(prop.suburb, prop.street_name).latitude,
+                longitude: prop.longitude ?? generateMockCoordinates(prop.suburb, prop.street_name).longitude,
+              } as PropertyDetails;
+            } catch (err: any) {
+              if (DEBUG) console.error(`fetchData: Error processing property[${index}]:`, err);
+              return null;
+            }
+          })
+          .filter((prop): prop is PropertyDetails => prop !== null);
+        if (DEBUG) console.log('fetchData: Normalized properties from state:', data.length);
+      } else {
+        if (DEBUG) console.warn('fetchData: No valid propertyMetrics, fetching from Supabase');
+        const { data: supabaseData, error: supabaseError } = await supabase
+          .from('properties')
+          .select('*, commission')
+          .order('created_at', { ascending: false });
+        if (DEBUG) console.log('fetchData: Supabase response:', {
+          dataLength: supabaseData?.length,
+          error: supabaseError,
+        });
+        if (supabaseError) {
+          throw new Error(`Supabase error: ${supabaseError.message}`);
+        }
+        if (!supabaseData || supabaseData.length === 0) {
+          throw new Error('No properties found in database');
+        }
+        data = supabaseData
+          .map((prop: PropertyDetails, index: number) => {
+            if (DEBUG) console.log(`fetchData: Processing Supabase property[${index}]:`, prop.id || 'No ID');
+            try {
+              if (!prop.id || !prop.suburb || !prop.street_name || !prop.street_number || !prop.postcode || !prop.category) {
+                if (DEBUG) console.warn(`fetchData: Skipping invalid Supabase property[${index}]:`, prop);
+                return null;
+              }
+              return {
+                ...prop,
+                suburb: normalizeSuburb(prop.suburb),
+                agent_name: prop.agent_name ?? 'Unknown',
+                agency_name: prop.agency_name ?? 'Unknown',
+                latitude: prop.latitude ?? generateMockCoordinates(prop.suburb, prop.street_name).latitude,
+                longitude: prop.longitude ?? generateMockCoordinates(prop.suburb, prop.street_name).longitude,
+              } as PropertyDetails;
+            } catch (err: any) {
+              if (DEBUG) console.error(`fetchData: Error processing Supabase property[${index}]:`, err);
+              return null;
+            }
+          })
+          .filter((prop): prop is PropertyDetails => prop !== null);
+        if (DEBUG) console.log('fetchData: Normalized properties from Supabase:', data.length);
+      }
+
+      if (data.length === 0) {
+        throw new Error('No valid properties after processing');
+      }
+
+      setProperties(data);
+    } catch (err: any) {
+      if (DEBUG) console.error('fetchData: Error:', err);
+      setError(err.message || 'Failed to fetch data');
+      toast.error(err.message || 'Failed to fetch data');
+    } finally {
+      if (DEBUG) console.log('fetchData: Completed, loading:', false);
+      setLoading(false);
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    if (DEBUG) console.log('useEffect: Initializing...');
+    if (!user) {
+      if (DEBUG) console.warn('useEffect: No user, setting error');
+      setError('Please log in to view comparison report');
+      setLoading(false);
+      return;
+    }
+
+    fetchData();
+
+    const subscription = supabase
+      .channel('properties')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'properties' }, () => {
+        if (DEBUG) console.log('useEffect: Properties table changed, refetching');
+        fetchData();
+      })
+      .subscribe();
+
+    return () => {
+      if (DEBUG) console.log('useEffect: Cleaning up Supabase subscription');
+      supabase.removeChannel(subscription);
+    };
+  }, [user, fetchData]);
+
+  // Compute comparison metrics
+  const comparisonMetrics = useMemo<ComparisonMetrics | null>(() => {
+    if (!user || !properties.length) {
+      if (DEBUG) console.warn('useMemo: No user or properties, returning null');
+      return null;
+    }
+
+    if (DEBUG) console.log('useMemo: Computing metrics for', properties.length, 'properties');
+
+    // 1. Harcourts Success Metrics
+    const harcourtsProperties = properties.filter((prop) => prop.agency_name === ourAgencyName);
+    const harcourtsAgents = [...new Set(harcourtsProperties.map((prop) => prop.agent_name || 'Unknown'))];
+    const agentMetrics = harcourtsAgents.map((agent) => {
+      const agentProps = harcourtsProperties.filter((prop) => prop.agent_name === agent);
+      return {
+        name: agent,
+        listings: agentProps.length,
+        sales: agentProps.filter((prop) => prop.sold_date).length,
+      };
+    });
+    const topAgent = agentMetrics.reduce(
+      (max, agent) => (agent.sales > max.sales ? agent : max),
+      { name: 'Unknown', listings: 0, sales: 0 }
+    );
+
+    const harcourtsSuccess = {
+      totalListings: harcourtsProperties.length,
+      totalSold: harcourtsProperties.filter((prop) => prop.sold_date).length,
+      agents: harcourtsAgents,
+      topAgent,
+    };
+
+    // 2. Agency Comparison (Sorted Highest to Lowest by Listed, then Sold)
+    const agencyMap: { [agency: string]: { listed: number; sold: number; agents: Set<string> } } = {};
+    properties.forEach((prop) => {
+      const agency = prop.agency_name || 'Unknown';
+      const agent = prop.agent_name || 'Unknown';
+      if (!agencyMap[agency]) {
+        agencyMap[agency] = { listed: 0, sold: 0, agents: new Set() };
+      }
+      agencyMap[agency].listed += 1;
+      if (prop.sold_date) agencyMap[agency].sold += 1;
+      agencyMap[agency].agents.add(agent);
+    });
+
+    const agencyComparison = Object.entries(agencyMap)
+      .map(([agency, { listed, sold, agents }]) => ({
+        agency: agency.charAt(0).toUpperCase() + agency.slice(1), // Capitalize agency name
+        listedCount: listed,
+        soldCount: sold,
+        agents: Array.from(agents),
+      }))
+      .sort((a, b) => b.listedCount - a.listedCount || b.soldCount - a.soldCount);
+
+    // 3. Agent Comparison (Sorted Highest to Lowest by Listings, then Sales)
+    const agentMap: { [key: string]: { listings: number; sales: number; agency: string } } = {};
+    properties.forEach((prop) => {
+      const agent = prop.agent_name || 'Unknown';
+      const agency = prop.agency_name || 'Unknown';
+      const key = `${agent}-${agency}`;
+      if (!agentMap[key]) {
+        agentMap[key] = { listings: 0, sales: 0, agency };
+      }
+      agentMap[key].listings += 1;
+      if (prop.sold_date) agentMap[key].sales += 1;
+    });
+
+    const agentComparison = Object.entries(agentMap)
+      .map(([key, { listings, sales, agency }]) => ({
+        agent: key.split('-')[0],
+        agency: agency.charAt(0).toUpperCase() + agency.slice(1), // Capitalize agency name
+        listings,
+        sales,
+      }))
+      .sort((a, b) => b.listings - a.listings || b.sales - a.sales)
+      .slice(0, 10); // Top 10 agents
+
+    // 4. Suburb Comparison (Sorted Highest to Lowest by Top Listings)
+    const suburbMap: { [suburb: string]: { agencies: { [agency: string]: number } } } = {};
+    properties.forEach((prop) => {
+      const suburb = normalizeSuburb(prop.suburb);
+      const agency = prop.agency_name || 'Unknown';
+      if (!suburbMap[suburb]) suburbMap[suburb] = { agencies: {} };
+      suburbMap[suburb].agencies[agency] = (suburbMap[suburb].agencies[agency] || 0) + 1;
+    });
+
+    const suburbComparison = Object.entries(suburbMap)
+      .map(([suburb, { agencies }]) => {
+        const topAgencyEntry = Object.entries(agencies).reduce(
+          (max, [agency, count]) => (count > max.count ? { agency, count } : max),
+          { agency: 'Unknown', count: 0 }
+        );
+        return {
+          suburb,
+          topAgency: topAgencyEntry.agency.charAt(0).toUpperCase() + topAgencyEntry.agency.slice(1), // Capitalize agency name
+          topListings: topAgencyEntry.count,
+          harcourtsListings: agencies[ourAgencyName] || 0,
+        };
+      })
+      .sort((a, b) => b.topListings - a.topListings || a.suburb.localeCompare(b.suburb));
+
+    return {
+      harcourtsSuccess,
+      agencyComparison,
+      agentComparison,
+      suburbComparison,
+    };
+  }, [properties, user]);
+
+  // Pagination for Agency Comparison
+  const totalPages = comparisonMetrics ? Math.ceil(comparisonMetrics.agencyComparison.length / itemsPerPage) : 1;
+  const paginatedAgencies = useMemo(() => {
+    if (!comparisonMetrics) return [];
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    return comparisonMetrics.agencyComparison.slice(start, end);
+  }, [comparisonMetrics, currentPage]);
+
+  // Chart Data
+  const agencyChartData = useMemo(() => {
+    if (!comparisonMetrics) return { labels: [], datasets: [] };
+    const labels = paginatedAgencies.map((item) => item.agency);
+    const listedData = paginatedAgencies.map((item) => item.listedCount);
+    const soldData = paginatedAgencies.map((item) => item.soldCount);
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Properties Listed',
+          data: listedData,
+          backgroundColor: labels.map((label) => (label === ourAgencyName ? '#1E3A8A' : '#BFDBFE')),
+          borderColor: labels.map((label) => (label === ourAgencyName ? '#1E3A8A' : '#BFDBFE')),
+          borderWidth: 1,
+        },
+        {
+          label: 'Properties Sold',
+          data: soldData,
+          backgroundColor: labels.map((label) => (label === ourAgencyName ? '#3B82F6' : '#93C5FD')),
+          borderColor: labels.map((label) => (label === ourAgencyName ? '#3B82F6' : '#93C5FD')),
+          borderWidth: 1,
+        },
+      ],
+    };
+  }, [paginatedAgencies, ourAgencyName]);
+
+  const donutChartData = useMemo(() => {
+    if (!comparisonMetrics) return { labels: [], datasets: [] };
+    const ourAgency = comparisonMetrics.agencyComparison.find((item) => item.agency === ourAgencyName);
+    const otherAgencies = comparisonMetrics.agencyComparison.filter((item) => item.agency !== ourAgencyName);
+    return {
+      labels: [ourAgencyName, 'Other Agencies'],
+      datasets: [
+        {
+          data: [
+            ourAgency?.soldCount || 0,
+            otherAgencies.reduce((sum, item) => sum + item.soldCount, 0),
+          ],
+          backgroundColor: ['#1E3A8A', '#BFDBFE'],
+          borderColor: ['#1E3A8A', '#BFDBFE'],
+          borderWidth: 1,
+        },
+      ],
+    };
+  }, [comparisonMetrics, ourAgencyName]);
+
+  // Export to PDF
+  const exportToPDF = () => {
+    if (!comparisonMetrics) return;
+    const doc = new jsPDF() as JsPDFWithAutoTable;
+    doc.setFont('Inter', 'normal');
+    doc.setFontSize(16);
+    doc.setTextColor(30, 64, 175); // Blue #1E3A8A
+    doc.text('Harcourts Success Performance Comparison', 20, 20);
+
+    // Harcourts Success Summary
+    doc.autoTable({
+      head: [['Metric', 'Value']],
+      body: [
+        ['Total Listings', comparisonMetrics.harcourtsSuccess.totalListings.toString()],
+        ['Total Sold', comparisonMetrics.harcourtsSuccess.totalSold.toString()],
+        ['Agents', comparisonMetrics.harcourtsSuccess.agents.join(', ')],
+        ['Top Agent', `${comparisonMetrics.harcourtsSuccess.topAgent.name} (${comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)`],
+      ],
+      startY: 30,
+      theme: 'striped',
+      headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
+      bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+    });
+
+    // Agency Comparison
+    doc.autoTable({
+      head: [['Rank', 'Agency', 'Agents', 'Properties Listed', 'Properties Sold']],
+      body: comparisonMetrics.agencyComparison.map((item, index) => [
+        (index + 1).toString(),
+        item.agency,
+        item.agents.join(', '),
+        item.listedCount.toString(),
+        item.soldCount.toString(),
+      ]),
+      startY: doc.lastAutoTable.finalY + 10,
+      theme: 'striped',
+      headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
+      bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+    });
+
+    // Agent Comparison
+    doc.autoTable({
+      head: [['Rank', 'Agent', 'Agency', 'Listings', 'Sales', 'Our Agent']],
+      body: comparisonMetrics.agentComparison.map((item, index) => [
+        (index + 1).toString(),
+        item.agent,
+        item.agency,
+        item.listings.toString(),
+        item.sales.toString(),
+        item.agent === ourAgentName && item.agency === ourAgencyName ? 'Yes' : 'No',
+      ]),
+      startY: doc.lastAutoTable.finalY + 10,
+      theme: 'striped',
+      headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
+      bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+    });
+
+    // Suburb Comparison
+    doc.autoTable({
+      head: [['Rank', 'Suburb', 'Top Agency', 'Top Listings', 'Harcourts Listings']],
+      body: comparisonMetrics.suburbComparison.map((item, index) => [
+        (index + 1).toString(),
+        item.suburb,
+        item.topAgency,
+        item.topListings.toString(),
+        item.harcourtsListings.toString(),
+      ]),
+      startY: doc.lastAutoTable.finalY + 10,
+      theme: 'striped',
+      headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
+      bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+    });
+
+    doc.save('Harcourts_Success_Comparison.pdf');
+  };
+
+  // Export to CSV
+  const exportToCSV = () => {
+    if (!comparisonMetrics) return;
+    const ws = utils.json_to_sheet([
+      { Metric: 'Total Listings', Value: comparisonMetrics.harcourtsSuccess.totalListings },
+      { Metric: 'Total Sold', Value: comparisonMetrics.harcourtsSuccess.totalSold },
+      { Metric: 'Agents', Value: comparisonMetrics.harcourtsSuccess.agents.join(', ') },
+      { Metric: 'Top Agent', Value: `${comparisonMetrics.harcourtsSuccess.topAgent.name} (${comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)` },
+      {},
+      ...comparisonMetrics.agencyComparison.map((item, index) => ({
+        Rank: index + 1,
+        Agency: item.agency,
+        Agents: item.agents.join(', '),
+        'Properties Listed': item.listedCount,
+        'Properties Sold': item.soldCount,
+      })),
+      {},
+      ...comparisonMetrics.agentComparison.map((item, index) => ({
+        Rank: index + 1,
+        Agent: item.agent,
+        Agency: item.agency,
+        Listings: item.listings,
+        Sales: item.sales,
+        'Our Agent': item.agent === ourAgentName && item.agency === ourAgencyName ? 'Yes' : 'No',
+      })),
+      {},
+      ...comparisonMetrics.suburbComparison.map((item, index) => ({
+        Rank: index + 1,
+        Suburb: item.suburb,
+        'Top Agency': item.topAgency,
+        'Top Listings': item.topListings,
+        'Harcourts Listings': item.harcourtsListings,
+      })),
+    ]);
+    const wb = utils.book_new();
+    utils.book_append_sheet(wb, ws, 'Harcourts_Success');
+    writeFile(wb, 'Harcourts_Success_Comparison.csv');
+  };
+
+  // Log state before render
+  if (DEBUG) {
+    console.log('Render state:', {
+      loading,
+      error,
+      properties: properties.length,
+      comparisonMetrics: comparisonMetrics ? 'Computed' : 'Not computed',
+      currentPage,
+      totalPages,
+      ourAgentName,
+      ourAgencyName,
+    });
+  }
+
+  return (
+    <ErrorBoundary
+      FallbackComponent={ErrorFallback}
+      onReset={() => {
+        if (DEBUG) console.log('ErrorBoundary: Reset triggered');
+        setError(null);
+        setProperties([]);
+        setLoading(true);
+        fetchData();
+      }}
+    >
+      <div className="min-h-screen bg-[#BFDBFE] py-8 px-4 sm:px-6 lg:px-8">
+        {loading ? (
+          <div className="flex justify-center items-center h-screen">
+            <Loader2 className="w-12 h-12 text-[#3B82F6] animate-spin" />
+          </div>
+        ) : error ? (
+          <div className="flex justify-center items-center h-screen text-[#1E3A8A]">
+            <div className="text-center">
+              <svg className="w-16 h-16 mx-auto mb-4 text-[#1E3A8A]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-xl font-semibold">Error: {error}</p>
+              <button
+                onClick={() => {
+                  if (DEBUG) console.log('Try Again clicked');
+                  setError(null);
+                  setLoading(true);
+                  fetchData();
+                }}
+                className="mt-4 px-6 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                aria-label="Try again"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-7xl mx-auto">
+            <div className="flex justify-between items-center mb-8">
+              <h1 className="text-3xl font-semibold text-[#1E3A8A]">Harcourts Success Comparison Report</h1>
+              <div className="flex items-center space-x-4">
+                <ThemeToggle isDark={isDark} setIsDark={setIsDark} />
+                <button
+                  onClick={() => {
+                    if (DEBUG) console.log('Navigating back to reports');
+                    navigate('/reports');
+                  }}
+                  className="flex items-center px-5 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                  aria-label="Back to reports"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Reports
+                </button>
+              </div>
+            </div>
+            <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-md p-6">
+              <h2 className="text-2xl font-semibold text-[#1E3A8A] mb-6">Performance Dashboard</h2>
+              {comparisonMetrics ? (
+                <div className="space-y-6">
+                  {/* Harcourts Success Spotlight */}
+                  <CollapsibleSection
+                    title="Harcourts Success Overview"
+                    isOpen={openSections.spotlight}
+                    toggleOpen={() => setOpenSections({ ...openSections, spotlight: !openSections.spotlight })}
+                  >
+                    <div className="p-6 bg-[#BFDBFE] rounded-md">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
+                          <p className="text-sm text-[#1E3A8A]">Total Listings</p>
+                          <p className="text-2xl font-semibold text-[#1E3A8A]">{comparisonMetrics.harcourtsSuccess.totalListings}</p>
+                        </div>
+                        <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
+                          <p className="text-sm text-[#1E3A8A]">Total Sold</p>
+                          <p className="text-2xl font-semibold text-[#1E3A8A]">{comparisonMetrics.harcourtsSuccess.totalSold}</p>
+                        </div>
+                        <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
+                          <p className="text-sm text-[#1E3A8A]">Active Agents</p>
+                          <p className="text-2xl font-semibold text-[#1E3A8A]">{comparisonMetrics.harcourtsSuccess.agents.length}</p>
+                        </div>
+                        <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
+                          <p className="text-sm text-[#1E3A8A]">Top Agent</p>
+                          <p className="text-base font-semibold text-[#1E3A8A]">
+                            {comparisonMetrics.harcourtsSuccess.topAgent.name} ({comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex justify-around">
+                        <ProgressCircle
+                          progress={
+                            (comparisonMetrics.harcourtsSuccess.totalSold /
+                              Math.max(...comparisonMetrics.agencyComparison.map((item) => item.soldCount))) *
+                            100
+                          }
+                          label="Sales vs. Top"
+                        />
+                        <ProgressCircle
+                          progress={
+                            (comparisonMetrics.harcourtsSuccess.totalListings /
+                              Math.max(...comparisonMetrics.agencyComparison.map((item) => item.listedCount))) *
+                            100
+                          }
+                          label="Listings vs. Top"
+                        />
+                      </div>
+                    </div>
+                  </CollapsibleSection>
+
+                  {/* Agency Comparison with Carousel Pagination */}
+                  <CollapsibleSection
+                    title="Agency Comparison (Sorted by Listings)"
+                    isOpen={openSections.agency}
+                    toggleOpen={() => setOpenSections({ ...openSections, agency: !openSections.agency })}
+                  >
+                    <div className="relative">
+                      <AnimatePresence mode="wait">
+                        <motion.div
+                          key={currentPage}
+                          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          {paginatedAgencies.map((item, index) => (
+                            <AgencyCard
+                              key={item.agency}
+                              item={item}
+                              index={index}
+                              globalIndex={(currentPage - 1) * itemsPerPage + index}
+                              maxSold={Math.max(...comparisonMetrics.agencyComparison.map((i) => i.soldCount))}
+                              isOurAgency={item.agency === ourAgencyName}
+                              comparisonMetrics={comparisonMetrics}
+                            />
+                          ))}
+                        </motion.div>
+                      </AnimatePresence>
+                      <div className="flex justify-between items-center mt-4">
+                        <button
+                          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                          disabled={currentPage === 1}
+                          className="p-2 rounded-md bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] disabled:bg-[#E5E7EB] disabled:text-[#6B7280] transition-colors"
+                          aria-label="Previous page"
+                        >
+                          <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <div className="flex space-x-2">
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                            <button
+                              key={page}
+                              className={`w-3 h-3 rounded-full ${
+                                currentPage === page ? 'bg-[#1E3A8A]' : 'bg-[#BFDBFE]'
+                              } hover:bg-[#3B82F6] transition-colors`}
+                              onClick={() => setCurrentPage(page)}
+                              aria-label={`Page ${page}`}
+                            />
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className="p-2 rounded-md bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] disabled:bg-[#E5E7EB] disabled:text-[#6B7280] transition-colors"
+                          aria-label="Next page"
+                        >
+                          <ChevronRight className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mt-6 bg-[#FFFFFF] p-4 rounded-md border border-[#E5E7EB]">
+                      <Bar
+                        data={agencyChartData}
+                        options={{
+                          responsive: true,
+                          plugins: {
+                            legend: { position: 'top', labels: { color: '#1E3A8A', font: { family: 'Inter' } } },
+                            title: { display: true, text: 'Agency Performance (Sorted by Listings)', color: '#1E3A8A', font: { family: 'Inter', size: 16 } },
+                          },
+                          scales: {
+                            x: { stacked: true, ticks: { color: '#1E3A8A', font: { family: 'Inter' } } },
+                            y: { stacked: true, ticks: { color: '#1E3A8A', font: { family: 'Inter' } } },
+                          },
+                        }}
+                      />
+                    </div>
+                    <div className="mt-6 bg-[#FFFFFF] p-4 rounded-md border border-[#E5E7EB]">
+                      <Doughnut
+                        data={donutChartData}
+                        options={{
+                          responsive: true,
+                          plugins: {
+                            legend: { position: 'top', labels: { color: '#1E3A8A', font: { family: 'Inter' } } },
+                            title: { display: true, text: 'Sales Share', color: '#1E3A8A', font: { family: 'Inter', size: 16 } },
+                          },
+                        }}
+                      />
+                    </div>
+                  </CollapsibleSection>
+
+                  {/* Agent Comparison */}
+                  <CollapsibleSection
+                    title="Agent Comparison (Sorted by Listings)"
+                    isOpen={openSections.agent}
+                    toggleOpen={() => setOpenSections({ ...openSections, agent: !openSections.agent })}
+                  >
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full border border-[#E5E7EB]">
+                        <thead className="bg-[#1E3A8A] text-white">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Rank</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Agent</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Agency</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Listings</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Sales</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Our Agent</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Progress</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E5E7EB]">
+                          {comparisonMetrics.agentComparison.map((item, index) => {
+                            const maxSales = Math.max(...comparisonMetrics.agentComparison.map((i) => i.sales));
+                            const progress = maxSales > 0 ? (item.sales / maxSales) * 100 : 0;
+                            const isOurAgent = item.agent === ourAgentName && item.agency === ourAgencyName;
+                            const rankPercentile = comparisonMetrics.agentComparison.length
+                              ? Math.ceil((index + 1) / comparisonMetrics.agentComparison.length * 100)
+                              : 100;
+                            return (
+                              <tr
+                                key={item.agent + item.agency}
+                                className={`relative ${isOurAgent ? 'bg-[#3B82F6] text-white sticky top-0 z-10' : 'bg-[#BFDBFE] text-[#1E3A8A]'}`}
+                              >
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{index + 1}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm relative group">
+                                  {item.agent}
+                                  {isOurAgent && (
+                                    <motion.div
+                                      className="absolute -top-3 -right-3 bg-[#BFDBFE] text-[#1E3A8A] rounded-full p-2 shadow-lg"
+                                      animate={{ boxShadow: ['0 0 0 0 rgba(59, 130, 246, 0.5)', '0 0 10px 5px rgba(59, 130, 246, 0.5)', '0 0 0 0 rgba(59, 130, 246, 0.5)'] }}
+                                      transition={{ duration: 0.8, repeat: Infinity }}
+                                      aria-label="Our Agent"
+                                    >
+                                      <Star className="w-4 h-4" />
+                                      <div className="absolute hidden group-hover:block bg-[#BFDBFE] text-[#1E3A8A] text-xs rounded p-2 mt-2 right-0">
+                                        Top {rankPercentile}% in Sales
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.agency}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.listings}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.sales}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                  {isOurAgent ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#1E3A8A] text-white">
+                                      Our Agent: {ourAgentName}
+                                    </span>
+                                  ) : (
+                                    'No'
+                                  )}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <ProgressCircle progress={progress} label="Sales" />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CollapsibleSection>
+
+                  {/* Suburb Comparison */}
+                  <CollapsibleSection
+                    title="Suburb Performance (Sorted by Top Listings)"
+                    isOpen={openSections.suburb}
+                    toggleOpen={() => setOpenSections({ ...openSections, suburb: !openSections.suburb })}
+                  >
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full border border-[#E5E7EB]">
+                        <thead className="bg-[#1E3A8A] text-white">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Rank</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Suburb</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Top Agency</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Top Listings</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Harcourts Listings</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Progress</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E5E7EB]">
+                          {comparisonMetrics.suburbComparison.map((item, index) => {
+                            const progress = item.topListings > 0 ? (item.harcourtsListings / item.topListings) * 100 : 0;
+                            return (
+                              <tr key={item.suburb} className="bg-[#BFDBFE] text-[#1E3A8A]">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{index + 1}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.suburb}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.topAgency}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.topListings}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">{item.harcourtsListings}</td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <ProgressCircle progress={progress} label="Listings" />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CollapsibleSection>
+
+                  {/* Export Buttons */}
+                  <div className="flex space-x-4">
+                    <button
+                      onClick={exportToPDF}
+                      className="px-4 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                      aria-label="Export to PDF"
+                    >
+                      Export PDF
+                    </button>
+                    <button
+                      onClick={exportToCSV}
+                      className="px-4 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                      aria-label="Export to CSV"
+                    >
+                      Export CSV
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[#1E3A8A] mb-4">
+                    No properties available. Try reloading or checking your data source.
+                  </p>
+                  <button
+                    onClick={() => {
+                      if (DEBUG) console.log('Reload clicked');
+                      setLoading(true);
+                      fetchData();
+                    }}
+                    className="flex items-center px-4 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                    aria-label="Reload data"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Reload
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </ErrorBoundary>
+  );
+}
+
+export default ComparisonReport;

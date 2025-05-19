@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L, { LatLngTuple } from 'leaflet';
 import { motion } from 'framer-motion';
 import { toast } from 'react-toastify';
+import 'leaflet/dist/leaflet.css';
 import { PropertyDetails } from './Reports';
 
 // Interfaces
@@ -61,11 +62,21 @@ const listedIcon = new L.Icon({
   popupAnchor: [0, -41],
 });
 
-// Simple distance calculation
+// Accurate distance calculation using Haversine formula
 const calculateDistance = (point1: LatLngTuple, point2: LatLngTuple): number => {
   const [lat1, lng1] = point1;
   const [lat2, lng2] = point2;
-  return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lng2 - lng1, 2));
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lng2 - lng1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in meters
 };
 
 // Debounce function
@@ -80,18 +91,15 @@ const debounce = (func: (...args: any[]) => void, wait: number) => {
 // Zoom Controls Component
 function ZoomControls() {
   const map = useMap();
-  const [zoom, setZoom] = useState(map.getZoom());
 
   const handleZoomIn = useCallback(() => {
     console.log('Zooming in');
     map.zoomIn();
-    setZoom(map.getZoom() + 1);
   }, [map]);
 
   const handleZoomOut = useCallback(() => {
     console.log('Zooming out');
     map.zoomOut();
-    setZoom(map.getZoom() - 1);
   }, [map]);
 
   return (
@@ -130,7 +138,7 @@ function StreetViewModal({
   coords: LatLngTuple;
   onClose: () => void;
 }) {
-  const streetViewUrl = `https://www.google.com/maps/embed?pb=!1m0!3m2!1sen!2sus!4v1!6m8!1m7!1s!2m2!1d${coords[0]}!2d${coords[1]}!3f0!4f0!5f0.7820865974627469`;
+  const streetViewUrl = `https://www.google.com/maps/embed/v1/streetview?key=YOUR_API_KEY&location=${coords[0]},${coords[1]}&heading=0&pitch=0&fov=90`;
 
   return (
     <motion.div
@@ -170,8 +178,8 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
   const defaultCenter: LatLngTuple = [-27.4705, 153.026];
   const center: LatLngTuple = selectedProperty
     ? [
-        selectedProperty.lat || getMockCoordinates(selectedProperty.suburb)[0],
-        selectedProperty.lng || getMockCoordinates(selectedProperty.suburb)[1],
+        selectedProperty.lat ?? getMockCoordinates(selectedProperty.suburb)[0],
+        selectedProperty.lng ?? getMockCoordinates(selectedProperty.suburb)[1],
       ]
     : defaultCenter;
 
@@ -201,23 +209,23 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
     }
 
     const maxProperties = 20; // Limit for performance
-    const radiusInDegrees = 1000 / 111000; // 1000m in degrees
-    console.log('Processing up to', maxProperties, 'properties with radius', radiusInDegrees);
+    const radiusInMeters = 1000; // 1000m
+    console.log('Processing up to', maxProperties, 'properties with radius', radiusInMeters);
 
     try {
       const filtered = properties
         .slice(0, maxProperties)
         .filter((prop) => {
           if (prop.id === selectedProperty.id) return false;
-          const propLat = prop.lat || getMockCoordinates(prop.suburb)[0];
-          const propLng = prop.lng || getMockCoordinates(prop.suburb)[1];
+          const propLat = prop.lat ?? getMockCoordinates(prop.suburb)[0];
+          const propLng = prop.lng ?? getMockCoordinates(prop.suburb)[1];
           if (!propLat || !propLng) {
             console.warn('Property missing coordinates:', prop);
             return false;
           }
           const propPoint: LatLngTuple = [propLat, propLng];
           const distance = calculateDistance(center, propPoint);
-          const isNearby = distance <= radiusInDegrees;
+          const isNearby = distance <= radiusInMeters;
           console.log('Property:', prop.id, 'Distance:', distance, 'Nearby:', isNearby);
           return isNearby;
         })
@@ -350,8 +358,8 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
         )}
         {nearbyProperties.sold.slice(0, 10).map((prop) => {
           const coords: LatLngTuple = [
-            prop.lat || getMockCoordinates(prop.suburb)[0],
-            prop.lng || getMockCoordinates(prop.suburb)[1],
+            prop.lat ?? getMockCoordinates(prop.suburb)[0],
+            prop.lng ?? getMockCoordinates(prop.suburb)[1],
           ];
           return (
             <Marker
@@ -393,8 +401,8 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
         })}
         {nearbyProperties.listed.slice(0, 10).map((prop) => {
           const coords: LatLngTuple = [
-            prop.lat || getMockCoordinates(prop.suburb)[0],
-            prop.lng || getMockCoordinates(prop.suburb)[1],
+            prop.lat ?? getMockCoordinates(prop.suburb)[0],
+            prop.lng ?? getMockCoordinates(prop.suburb)[1],
           ];
           return (
             <Marker
