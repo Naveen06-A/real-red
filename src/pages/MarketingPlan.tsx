@@ -34,7 +34,7 @@ const PREDEFINED_SUBURBS = [
   'Kenmore 4069',
   'Kenmore Hills 4069',
   'Fig Tree Pocket 4069',
-  'Pinjara Hills 4069'
+  'Pinjara Hills 4069',
 ];
 
 interface DoorKnockStreet {
@@ -75,6 +75,7 @@ interface MarketingPlan {
 interface ActualProgress {
   doorKnocks: { completed: number; target: number };
   doorKnocksMade: { completed: number; target: number };
+  doorKnockAnswers: { completed: number; target: number };
   doorKnockConnects: { completed: number; target: number };
   doorKnockDesktopAppraisals: { completed: number; target: number };
   doorKnockFaceToFaceAppraisals: { completed: number; target: number };
@@ -91,6 +92,7 @@ export function MarketingPlanPage() {
   const [actualProgress, setActualProgress] = useState<ActualProgress>({
     doorKnocks: { completed: 0, target: 0 },
     doorKnocksMade: { completed: 0, target: 0 },
+    doorKnockAnswers: { completed: 0, target: 0 },
     doorKnockConnects: { completed: 0, target: 0 },
     doorKnockDesktopAppraisals: { completed: 0, target: 0 },
     doorKnockFaceToFaceAppraisals: { completed: 0, target: 0 },
@@ -150,7 +152,6 @@ export function MarketingPlanPage() {
 
         if (profile.role === 'agent') {
           await loadMarketingPlan(user.id);
-          await fetchActualProgress(user.id);
           await loadSavedPlans(user.id);
         } else {
           navigate('/agent-login');
@@ -164,6 +165,12 @@ export function MarketingPlanPage() {
 
     initializeAgent();
   }, [user, profile, navigate]);
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchActualProgress(user.id);
+    }
+  }, [user, marketingPlan]);
 
   useEffect(() => {
     if (saveSuccess) {
@@ -200,7 +207,10 @@ export function MarketingPlanPage() {
             id: street.id || uuidv4(),
             name: toTitleCase(street.name || ''),
             why: toTitleCase(street.why || ''),
+            house_count: street.house_count || '',
+            target_knocks: street.target_knocks || '',
             target_made: street.target_made || '',
+            target_answers: street.target_answers || '',
             target_connects: street.target_connects || '',
             desktop_appraisals: street.desktop_appraisals || '',
             face_to_face_appraisals: street.face_to_face_appraisals || '',
@@ -210,6 +220,7 @@ export function MarketingPlanPage() {
             id: street.id || uuidv4(),
             name: toTitleCase(street.name || ''),
             why: toTitleCase(street.why || ''),
+            target_calls: street.target_calls || '',
             target_connects: street.target_connects || '',
             desktop_appraisals: street.desktop_appraisals || '',
             face_to_face_appraisals: street.face_to_face_appraisals || '',
@@ -244,7 +255,10 @@ export function MarketingPlanPage() {
             id: street.id || uuidv4(),
             name: toTitleCase(street.name || ''),
             why: toTitleCase(street.why || ''),
+            house_count: street.house_count || '',
+            target_knocks: street.target_knocks || '',
             target_made: street.target_made || '',
+            target_answers: street.target_answers || '',
             target_connects: street.target_connects || '',
             desktop_appraisals: street.desktop_appraisals || '',
             face_to_face_appraisals: street.face_to_face_appraisals || '',
@@ -254,6 +268,7 @@ export function MarketingPlanPage() {
             id: street.id || uuidv4(),
             name: toTitleCase(street.name || ''),
             why: toTitleCase(street.why || ''),
+            target_calls: street.target_calls || '',
             target_connects: street.target_connects || '',
             desktop_appraisals: street.desktop_appraisals || '',
             face_to_face_appraisals: street.face_to_face_appraisals || '',
@@ -272,46 +287,52 @@ export function MarketingPlanPage() {
       const { data: activities, error } = await supabase
         .from('agent_activities')
         .select('*')
-        .eq('agent_id', agentId);
+        .eq('agent_id', agentId)
+        .gte('activity_date', marketingPlan.start_date || new Date().toISOString())
+        .lte('activity_date', marketingPlan.end_date || new Date().toISOString());
 
       if (error) {
         throw error;
       }
 
       const totalTargetKnocks = marketingPlan.door_knock_streets.reduce(
-        (sum, street) => sum + parseInt(street.target_knocks || '0'),
+        (sum, street) => sum + (parseInt(street.target_knocks || '0') || 0),
         0
       );
       const totalTargetKnocksMade = marketingPlan.door_knock_streets.reduce(
-        (sum, street) => sum + parseInt(street.target_made || '0'),
+        (sum, street) => sum + (parseInt(street.target_made || '0') || 0),
+        0
+      );
+      const totalTargetDoorKnockAnswers = marketingPlan.door_knock_streets.reduce(
+        (sum, street) => sum + (parseInt(street.target_answers || '0') || 0),
         0
       );
       const totalTargetDoorKnockConnects = marketingPlan.door_knock_streets.reduce(
-        (sum, street) => sum + parseInt(street.target_connects || '0'),
-        0
-      );
-      const totalTargetCalls = marketingPlan.phone_call_streets.reduce(
-        (sum, street) => sum + parseInt(street.target_calls || '0'),
-        0
-      );
-      const totalTargetPhoneCallConnects = marketingPlan.phone_call_streets.reduce(
-        (sum, street) => sum + parseInt(street.target_connects || '0'),
+        (sum, street) => sum + (parseInt(street.target_connects || '0') || 0),
         0
       );
       const totalTargetDoorKnockDesktopAppraisals = marketingPlan.door_knock_streets.reduce(
-        (sum, street) => sum + parseInt(street.desktop_appraisals || '0'),
-        0
-      );
-      const totalTargetPhoneCallDesktopAppraisals = marketingPlan.phone_call_streets.reduce(
-        (sum, street) => sum + parseInt(street.desktop_appraisals || '0'),
+        (sum, street) => sum + (parseInt(street.desktop_appraisals || '0') || 0),
         0
       );
       const totalTargetDoorKnockFaceToFaceAppraisals = marketingPlan.door_knock_streets.reduce(
-        (sum, street) => sum + parseInt(street.face_to_face_appraisals || '0'),
+        (sum, street) => sum + (parseInt(street.face_to_face_appraisals || '0') || 0),
+        0
+      );
+      const totalTargetCalls = marketingPlan.phone_call_streets.reduce(
+        (sum, street) => sum + (parseInt(street.target_calls || '0') || 0),
+        0
+      );
+      const totalTargetPhoneCallConnects = marketingPlan.phone_call_streets.reduce(
+        (sum, street) => sum + (parseInt(street.target_connects || '0') || 0),
+        0
+      );
+      const totalTargetPhoneCallDesktopAppraisals = marketingPlan.phone_call_streets.reduce(
+        (sum, street) => sum + (parseInt(street.desktop_appraisals || '0') || 0),
         0
       );
       const totalTargetPhoneCallFaceToFaceAppraisals = marketingPlan.phone_call_streets.reduce(
-        (sum, street) => sum + parseInt(street.face_to_face_appraisals || '0'),
+        (sum, street) => sum + (parseInt(street.face_to_face_appraisals || '0') || 0),
         0
       );
 
@@ -321,6 +342,7 @@ export function MarketingPlanPage() {
               if (activity.activity_type === 'door_knock') {
                 acc.doorKnocks.completed += activity.knocks_made || 0;
                 acc.doorKnocksMade.completed += activity.knocks_made || 0;
+                acc.doorKnockAnswers.completed += activity.knocks_answered || 0;
                 acc.doorKnockConnects.completed += activity.knocks_connected || 0;
                 acc.doorKnockDesktopAppraisals.completed += activity.desktop_appraisals || 0;
                 acc.doorKnockFaceToFaceAppraisals.completed += activity.face_to_face_appraisals || 0;
@@ -335,6 +357,7 @@ export function MarketingPlanPage() {
             {
               doorKnocks: { completed: 0, target: totalTargetKnocks },
               doorKnocksMade: { completed: 0, target: totalTargetKnocksMade },
+              doorKnockAnswers: { completed: 0, target: totalTargetDoorKnockAnswers },
               doorKnockConnects: { completed: 0, target: totalTargetDoorKnockConnects },
               doorKnockDesktopAppraisals: { completed: 0, target: totalTargetDoorKnockDesktopAppraisals },
               doorKnockFaceToFaceAppraisals: { completed: 0, target: totalTargetDoorKnockFaceToFaceAppraisals },
@@ -347,6 +370,7 @@ export function MarketingPlanPage() {
         : {
             doorKnocks: { completed: 0, target: totalTargetKnocks },
             doorKnocksMade: { completed: 0, target: totalTargetKnocksMade },
+            doorKnockAnswers: { completed: 0, target: totalTargetDoorKnockAnswers },
             doorKnockConnects: { completed: 0, target: totalTargetDoorKnockConnects },
             doorKnockDesktopAppraisals: { completed: 0, target: totalTargetDoorKnockDesktopAppraisals },
             doorKnockFaceToFaceAppraisals: { completed: 0, target: totalTargetDoorKnockFaceToFaceAppraisals },
@@ -465,7 +489,6 @@ export function MarketingPlanPage() {
       }
 
       await loadMarketingPlan(user.id);
-      await fetchActualProgress(user.id);
       await loadSavedPlans(user.id);
       setSaveSuccess(true);
     } catch (error: any) {
@@ -488,7 +511,7 @@ export function MarketingPlanPage() {
     setSelectedActivity('all');
   };
 
-  const viewPlan = (plan: MarketingPlan) => {
+  const viewPlan = async (plan: MarketingPlan) => {
     setMarketingPlan({
       ...plan,
       created_at: plan.created_at || undefined,
@@ -496,6 +519,9 @@ export function MarketingPlanPage() {
     });
     setIsCustomSuburb(!PREDEFINED_SUBURBS.includes(plan.suburb) && plan.suburb !== '');
     setShowPlansModal(false);
+    if (user?.id) {
+      await fetchActualProgress(user.id); // Ensure progress is recalculated for the loaded plan
+    }
   };
 
   const addStreet = (type: 'door_knock' | 'phone_call') => {
@@ -583,15 +609,19 @@ export function MarketingPlanPage() {
   };
 
   const totalKnocks = marketingPlan.door_knock_streets.reduce(
-    (sum, street) => sum + parseInt(street.target_knocks || '0'),
+    (sum, street) => sum + (parseInt(street.target_knocks || '0') || 0),
     0
   );
   const totalKnocksMade = marketingPlan.door_knock_streets.reduce(
-    (sum, street) => sum + parseInt(street.target_made || '0'),
+    (sum, street) => sum + (parseInt(street.target_made || '0') || 0),
+    0
+  );
+  const totalAnswers = marketingPlan.door_knock_streets.reduce(
+    (sum, street) => sum + (parseInt(street.target_answers || '0') || 0),
     0
   );
   const totalCalls = marketingPlan.phone_call_streets.reduce(
-    (sum, street) => sum + parseInt(street.target_calls || '0'),
+    (sum, street) => sum + (parseInt(street.target_calls || '0') || 0),
     0
   );
 
@@ -617,8 +647,18 @@ export function MarketingPlanPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <svg className="w-8 h-8 mr-3 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          <svg
+            className="w-8 h-8 mr-3 text-indigo-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+            />
           </svg>
           Weekly Marketing Plan
         </motion.h1>
@@ -685,11 +725,85 @@ export function MarketingPlanPage() {
                   <div className="space-y-4">
                     {savedPlans.map((plan) => (
                       <div key={plan.id} className="border p-4 rounded-lg bg-gray-50">
-                        <p><strong>Suburb:</strong> {plan.suburb}</p>
-                        <p><strong>Start Date:</strong> {new Date(plan.start_date).toLocaleDateString()}</p>
-                        <p><strong>End Date:</strong> {new Date(plan.end_date).toLocaleDateString()}</p>
-                        <p><strong>Total Knocks:</strong> {plan.door_knock_streets.reduce((sum, s) => sum + parseInt(s.target_knocks || '0'), 0)}</p>
-                        <p><strong>Total Calls:</strong> {plan.phone_call_streets.reduce((sum, s) => sum + parseInt(s.target_calls || '0'), 0)}</p>
+                        <p>
+                          <strong>Suburb:</strong> {plan.suburb}
+                        </p>
+                        <p>
+                          <strong>Start Date:</strong> {new Date(plan.start_date).toLocaleDateString()}
+                        </p>
+                        <p>
+                          <strong>End Date:</strong> {new Date(plan.end_date).toLocaleDateString()}
+                        </p>
+                        <p>
+                          <strong>Total Target Knocks:</strong>{' '}
+                          {plan.door_knock_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.target_knocks || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Knocks Made:</strong>{' '}
+                          {plan.door_knock_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.target_made || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Answers:</strong>{' '}
+                          {plan.door_knock_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.target_answers || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Door Knock Connects:</strong>{' '}
+                          {plan.door_knock_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.target_connects || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Door Knock Desktop Appraisals:</strong>{' '}
+                          {plan.door_knock_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.desktop_appraisals || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Door Knock Face-to-Face Appraisals:</strong>{' '}
+                          {plan.door_knock_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.face_to_face_appraisals || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Target Calls:</strong>{' '}
+                          {plan.phone_call_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.target_calls || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Phone Call Connects:</strong>{' '}
+                          {plan.phone_call_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.target_connects || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Phone Call Desktop Appraisals:</strong>{' '}
+                          {plan.phone_call_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.desktop_appraisals || '0') || 0),
+                            0
+                          )}
+                        </p>
+                        <p>
+                          <strong>Total Phone Call Face-to-Face Appraisals:</strong>{' '}
+                          {plan.phone_call_streets.reduce(
+                            (sum, s) => sum + (parseInt(s.face_to_face_appraisals || '0') || 0),
+                            0
+                          )}
+                        </p>
                         <motion.button
                           onClick={() => viewPlan(plan)}
                           className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700"
@@ -808,8 +922,18 @@ export function MarketingPlanPage() {
               transition={{ duration: 0.5, delay: 0.6 }}
             >
               <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                <svg className="w-5 h-5 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                <svg
+                  className="w-5 h-5 mr-2 text-indigo-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  />
                 </svg>
                 Current Progress
               </h2>
@@ -840,6 +964,58 @@ export function MarketingPlanPage() {
                   </div>
                 </div>
                 <div className="relative group">
+                  <p className="font-semibold text-gray-800 mb-2">Door Knocks Made</p>
+                  <div className="flex items-center">
+                    <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
+                        style={{
+                          width: `${Math.min(
+                            (actualProgress.doorKnocksMade.completed / (actualProgress.doorKnocksMade.target || 1)) *
+                              100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">
+                      {actualProgress.doorKnocksMade.completed}/{actualProgress.doorKnocksMade.target}
+                    </span>
+                  </div>
+                  <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
+                    {Math.round(
+                      (actualProgress.doorKnocksMade.completed / (actualProgress.doorKnocksMade.target || 1)) * 100
+                    )}
+                    % Complete
+                  </div>
+                </div>
+                <div className="relative group">
+                  <p className="font-semibold text-gray-800 mb-2">Door Knock Answers</p>
+                  <div className="flex items-center">
+                    <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
+                        style={{
+                          width: `${Math.min(
+                            (actualProgress.doorKnockAnswers.completed / (actualProgress.doorKnockAnswers.target || 1)) *
+                              100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">
+                      {actualProgress.doorKnockAnswers.completed}/{actualProgress.doorKnockAnswers.target}
+                    </span>
+                  </div>
+                  <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
+                    {Math.round(
+                      (actualProgress.doorKnockAnswers.completed / (actualProgress.doorKnockAnswers.target || 1)) * 100
+                    )}
+                    % Complete
+                  </div>
+                </div>
+                <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knock Connects</p>
                   <div className="flex items-center">
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
@@ -847,7 +1023,9 @@ export function MarketingPlanPage() {
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
                           width: `${Math.min(
-                            (actualProgress.doorKnockConnects.completed / (actualProgress.doorKnockConnects.target || 1)) * 100,
+                            (actualProgress.doorKnockConnects.completed /
+                              (actualProgress.doorKnockConnects.target || 1)) *
+                              100,
                             100
                           )}%`,
                         }}
@@ -872,19 +1050,24 @@ export function MarketingPlanPage() {
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
                           width: `${Math.min(
-                            (actualProgress.doorKnockDesktopAppraisals.completed / (actualProgress.doorKnockDesktopAppraisals.target || 1)) * 100,
+                            (actualProgress.doorKnockDesktopAppraisals.completed /
+                              (actualProgress.doorKnockDesktopAppraisals.target || 1)) *
+                              100,
                             100
                           )}%`,
                         }}
                       />
                     </div>
                     <span className="text-sm font-medium text-gray-700">
-                      {actualProgress.doorKnockDesktopAppraisals.completed}/{actualProgress.doorKnockDesktopAppraisals.target}
+                      {actualProgress.doorKnockDesktopAppraisals.completed}/
+                      {actualProgress.doorKnockDesktopAppraisals.target}
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
                     {Math.round(
-                      (actualProgress.doorKnockDesktopAppraisals.completed / (actualProgress.doorKnockDesktopAppraisals.target || 1)) * 100
+                      (actualProgress.doorKnockDesktopAppraisals.completed /
+                        (actualProgress.doorKnockDesktopAppraisals.target || 1)) *
+                        100
                     )}
                     % Complete
                   </div>
@@ -897,19 +1080,24 @@ export function MarketingPlanPage() {
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
                           width: `${Math.min(
-                            (actualProgress.doorKnockFaceToFaceAppraisals.completed / (actualProgress.doorKnockFaceToFaceAppraisals.target || 1)) * 100,
+                            (actualProgress.doorKnockFaceToFaceAppraisals.completed /
+                              (actualProgress.doorKnockFaceToFaceAppraisals.target || 1)) *
+                              100,
                             100
                           )}%`,
                         }}
                       />
                     </div>
                     <span className="text-sm font-medium text-gray-700">
-                      {actualProgress.doorKnockFaceToFaceAppraisals.completed}/{actualProgress.doorKnockFaceToFaceAppraisals.target}
+                      {actualProgress.doorKnockFaceToFaceAppraisals.completed}/
+                      {actualProgress.doorKnockFaceToFaceAppraisals.target}
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
                     {Math.round(
-                      (actualProgress.doorKnockFaceToFaceAppraisals.completed / (actualProgress.doorKnockFaceToFaceAppraisals.target || 1)) * 100
+                      (actualProgress.doorKnockFaceToFaceAppraisals.completed /
+                        (actualProgress.doorKnockFaceToFaceAppraisals.target || 1)) *
+                        100
                     )}
                     % Complete
                   </div>
@@ -947,7 +1135,9 @@ export function MarketingPlanPage() {
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
                           width: `${Math.min(
-                            (actualProgress.phoneCallConnects.completed / (actualProgress.phoneCallConnects.target || 1)) * 100,
+                            (actualProgress.phoneCallConnects.completed /
+                              (actualProgress.phoneCallConnects.target || 1)) *
+                              100,
                             100
                           )}%`,
                         }}
@@ -972,19 +1162,24 @@ export function MarketingPlanPage() {
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
                           width: `${Math.min(
-                            (actualProgress.phoneCallDesktopAppraisals.completed / (actualProgress.phoneCallDesktopAppraisals.target || 1)) * 100,
+                            (actualProgress.phoneCallDesktopAppraisals.completed /
+                              (actualProgress.phoneCallDesktopAppraisals.target || 1)) *
+                              100,
                             100
                           )}%`,
                         }}
                       />
                     </div>
                     <span className="text-sm font-medium text-gray-700">
-                      {actualProgress.phoneCallDesktopAppraisals.completed}/{actualProgress.phoneCallDesktopAppraisals.target}
+                      {actualProgress.phoneCallDesktopAppraisals.completed}/
+                      {actualProgress.phoneCallDesktopAppraisals.target}
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
                     {Math.round(
-                      (actualProgress.phoneCallDesktopAppraisals.completed / (actualProgress.phoneCallDesktopAppraisals.target || 1)) * 100
+                      (actualProgress.phoneCallDesktopAppraisals.completed /
+                        (actualProgress.phoneCallDesktopAppraisals.target || 1)) *
+                        100
                     )}
                     % Complete
                   </div>
@@ -997,19 +1192,24 @@ export function MarketingPlanPage() {
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
                           width: `${Math.min(
-                            (actualProgress.phoneCallFaceToFaceAppraisals.completed / (actualProgress.phoneCallFaceToFaceAppraisals.target || 1)) * 100,
+                            (actualProgress.phoneCallFaceToFaceAppraisals.completed /
+                              (actualProgress.phoneCallFaceToFaceAppraisals.target || 1)) *
+                              100,
                             100
                           )}%`,
                         }}
                       />
                     </div>
                     <span className="text-sm font-medium text-gray-700">
-                      {actualProgress.phoneCallFaceToFaceAppraisals.completed}/{actualProgress.phoneCallFaceToFaceAppraisals.target}
+                      {actualProgress.phoneCallFaceToFaceAppraisals.completed}/
+                      {actualProgress.phoneCallFaceToFaceAppraisals.target}
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
                     {Math.round(
-                      (actualProgress.phoneCallFaceToFaceAppraisals.completed / (actualProgress.phoneCallFaceToFaceAppraisals.target || 1)) * 100
+                      (actualProgress.phoneCallFaceToFaceAppraisals.completed /
+                        (actualProgress.phoneCallFaceToFaceAppraisals.target || 1)) *
+                        100
                     )}
                     % Complete
                   </div>
@@ -1019,9 +1219,7 @@ export function MarketingPlanPage() {
 
             <div>
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold text-gray-800 flex items-center">
-                  Activities
-                </h3>
+                <h3 className="text-lg font-semibold text-gray-800 flex items-center">Activities</h3>
                 <select
                   value={selectedActivity}
                   onChange={(e) => setSelectedActivity(e.target.value as 'all' | 'door_knock' | 'phone_call')}
@@ -1035,11 +1233,10 @@ export function MarketingPlanPage() {
               <div className="flex justify-between mb-4">
                 <p className="text-gray-700 font-medium">Total Knocks: {totalKnocks}</p>
                 <p className="text-gray-700 font-medium">Total Knocks Made: {totalKnocksMade}</p>
+                <p className="text-gray-700 font-medium">Total Answers: {totalAnswers}</p>
                 <p className="text-gray-700 font-medium">Total Calls: {totalCalls}</p>
               </div>
-              {errors.streets && (
-                <p className="text-red-600 text-sm mb-4 font-medium">{errors.streets}</p>
-              )}
+              {errors.streets && <p className="text-red-600 text-sm mb-4 font-medium">{errors.streets}</p>}
               {(selectedActivity === 'all' || selectedActivity === 'door_knock') && (
                 <div className="mb-6">
                   <div className="flex justify-between items-center mb-4">
@@ -1175,122 +1372,9 @@ export function MarketingPlanPage() {
                         <input
                           type="number"
                           value={street.face_to_face_appraisals}
-                          onChange={(e) => updateStreet('door_knock', street.id, 'face_to_face_appraisals', e.target.value)}
-                          className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                          placeholder="Face-to-Face Appraisals"
-                          min="0"
-                          aria-label={`Door knock street ${index + 1} face-to-face appraisals`}
-                        />
-                      </div>
-                      <motion.button
-                        onClick={() => removeStreet('door_knock', street.id)}
-                        className="mt-4 flex items-center text-red-600 hover:text-red-800 font-medium transition-colors duration-200"
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        title={`Remove door knock street ${index + 1}`}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Remove Street
-                      </motion.button>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-              {(selectedActivity === 'all' || selectedActivity === 'phone_call') && (
-                <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-gray-800 flex items-center">
-                      <Phone className="w-5 h-5 mr-2 text-indigo-600" />
-                      Phone Calls
-                    </h3>
-                    <motion.button
-                      onClick={() => addStreet('phone_call')}
-                      className="flex items-center px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-full hover:from-indigo-700 hover:to-indigo-800 transition-all shadow-md"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      title="Add phone call street"
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add Street
-                    </motion.button>
-                  </div>
-                  {marketingPlan.phone_call_streets.map((street, index) => (
-                    <motion.div
-                      key={street.id}
-                      className="border border-gray-200 p-4 mb-4 rounded-lg bg-gray-50 hover:shadow-md transition-shadow duration-200"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <input
-                            type="text"
-                            value={street.name}
-                            onChange={(e) => updateStreet('phone_call', street.id, 'name', e.target.value)}
-                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                            placeholder="Street Name *"
-                            aria-label={`Phone call street ${index + 1} name`}
-                          />
-                          {errors[`phone_call_street_${index}_name`] && (
-                            <p className="text-red-600 text-sm mt-1 font-medium">
-                              {errors[`phone_call_street_${index}_name`]}
-                            </p>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={street.why}
-                          onChange={(e) => updateStreet('phone_call', street.id, 'why', e.target.value)}
-                          className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                          placeholder="Why this street?"
-                          aria-label={`Phone call street ${index + 1} reason`}
-                        />
-                        <div>
-                          <input
-                            type="number"
-                            value={street.target_calls}
-                            onChange={(e) => updateStreet('phone_call', street.id, 'target_calls', e.target.value)}
-                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                            placeholder="Target Calls *"
-                            min="1"
-                            aria-label={`Phone call street ${index + 1} target calls`}
-                          />
-                          {errors[`phone_call_street_${index}_target_calls`] && (
-                            <p className="text-red-600 text-sm mt-1 font-medium">
-                              {errors[`phone_call_street_${index}_target_calls`]}
-                            </p>
-                          )}
-                        </div>
-                        <div>
-                          <input
-                            type="number"
-                            value={street.target_connects}
-                            onChange={(e) => updateStreet('phone_call', street.id, 'target_connects', e.target.value)}
-                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                            placeholder="Target Connects *"
-                            min="1"
-                            aria-label={`Phone call street ${index + 1} target connects`}
-                          />
-                          {errors[`phone_call_street_${index}_target_connects`] && (
-                            <p className="text-red-600 text-sm mt-1 font-medium">
-                              {errors[`phone_call_street_${index}_target_connects`]}
-                            </p>
-                          )}
-                        </div>
-                        <input
-                          type="number"
-                          value={street.desktop_appraisals}
-                          onChange={(e) => updateStreet('phone_call', street.id, 'desktop_appraisals', e.target.value)}
-                          className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                          placeholder="Desktop Appraisals"
-                          min="0"
-                          aria-label={`Phone call street ${index + 1} desktop appraisals`}
-                        />
-                        <input
-                          type="number"
-                          value={street.face_to_face_appraisals}
-                          onChange={(e) => updateStreet('phone_call', street.id, 'face_to_face_appraisals', e.target.value)}
+                          onChange={(e) =>
+                            updateStreet('phone_call', street.id, 'face_to_face_appraisals', e.target.value)
+                          }
                           className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                           placeholder="Face-to-Face Appraisals"
                           min="0"
@@ -1322,7 +1406,12 @@ export function MarketingPlanPage() {
                 title="Save marketing plan"
               >
                 <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                  />
                 </svg>
                 Save Marketing Plan
               </motion.button>
