@@ -25,8 +25,8 @@ const toTitleCase = (str: string) => {
 
 // Predefined suburbs
 const PREDEFINED_SUBURBS = [
-  'Moggill 4070',
-  'Bellbowrie 4070',
+  'Moggill  QLD 4070',
+  'Bellbowrie QLD 4070',
   'Pullenvale 4069',
   'Brookfield 4069',
   'Anstead 4070',

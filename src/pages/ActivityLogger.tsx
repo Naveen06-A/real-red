@@ -1,31 +1,41 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Clock, Send, CheckCircle, ChevronLeft } from 'lucide-react';
+import { Clock, Send, CheckCircle, ChevronLeft, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
-import { Navigation } from './components/Navigation';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ErrorBoundary } from 'react-error-boundary';
 import { toast } from 'react-toastify';
 
+// Define interfaces for type safety
 interface DoorKnockStreet {
+  id: string;
   name: string;
   why: string;
   house_count: string;
   target_knocks: string;
   target_answers: string;
+  desktop_appraisals: string;
+  face_to_face_appraisals: string;
 }
 
 interface PhoneCallStreet {
+  id: string;
   name: string;
   why: string;
   target_calls: string;
+  target_connects: string;
+  desktop_appraisals: string;
+  face_to_face_appraisals: string;
 }
 
 interface MarketingPlan {
+  id: string;
   agent: string;
   suburb: string;
+  start_date: string;
+  end_date: string;
   door_knock_streets: DoorKnockStreet[];
   phone_call_streets: PhoneCallStreet[];
 }
@@ -43,6 +53,11 @@ interface ActivityLog {
   notes: string;
   date: string;
   submitting?: boolean;
+}
+
+interface UserProfile {
+  id: string;
+  role: string;
 }
 
 const ErrorFallback = ({ error }: { error: Error }) => (
@@ -264,27 +279,11 @@ export function ActivityLogger() {
   const { user, profile, loading, initializeAuth } = useAuthStore();
   const navigate = useNavigate();
 
-  // Utility function to capitalize the first letter
   const capitalizeFirstLetter = (str: string) => {
     if (!str) return '';
     return str.charAt(0).toUpperCase() + str.slice(1);
   };
 
-  // Static list of suburbs
-  const suburbs = [
-    'Pullenvale 4069',
-    'Brookfield 4069',
-    'Anstead 4070',
-    'Chapell Hill 4069',
-    'Kenmore 4069',
-    'Kenmore Hills 4069',
-    'Fig Tree Pocket 4069',
-    'Pinjara Hills 4069',
-    'Moggill QLD (4070)',
-    'Bellbowrie QLD (4070)',
-  ].map(capitalizeFirstLetter);
-
-  // Get current date in UTC
   const getCurrentUTCDate = () => {
     const now = new Date();
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
@@ -306,131 +305,191 @@ export function ActivityLogger() {
     date: getCurrentUTCDate(),
     submitting: false,
   });
-  const [success, setSuccess] = useState<'phone_call' | 'door_knock' | null>(null);
+  const [marketingPlanEdit, setMarketingPlanEdit] = useState<{
+    id: string;
+    suburb: string;
+    start_date: string;
+    end_date: string;
+    submitting: boolean;
+  }>({
+    id: '',
+    suburb: '',
+    start_date: '',
+    end_date: '',
+    submitting: false,
+  });
+  const [success, setSuccess] = useState<'phone_call' | 'door_knock' | 'plan_edit' | null>(null);
   const [showReport, setShowReport] = useState(false);
-  const [marketingPlan, setMarketingPlan] = useState<MarketingPlan | null>(null);
+  const [marketingPlans, setMarketingPlans] = useState<MarketingPlan[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
-  const [isCustomSuburb, setIsCustomSuburb] = useState(false);
+  const [planErrors, setPlanErrors] = useState<{ [key: string]: string }>({});
+  const [isCustomStreet, setIsCustomStreet] = useState(false);
   const [recommendedStreet, setRecommendedStreet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
+  const [isUpdatingPlan, setIsUpdatingPlan] = useState(false);
 
-  // Initialize auth and load marketing plan
   useEffect(() => {
-    console.log('useEffect: Checking auth state', { user, profile, loading });
     if (!loading && !user) {
       initializeAuth().then(() => {
         const updatedUser = useAuthStore.getState().user;
         const updatedProfile = useAuthStore.getState().profile;
-        console.log('Auth initialized', { updatedUser, updatedProfile });
         if (!updatedUser || !updatedProfile) {
-          console.log('No user or profile, redirecting to /agent-login');
           navigate('/agent-login');
         } else if (updatedProfile.role !== 'agent') {
-          console.log('User is not an agent, redirecting to /agent-login');
           navigate('/agent-login');
         } else {
-          console.log('Loading marketing plan for agent:', updatedUser.id);
-          loadMarketingPlan(updatedUser.id);
+          loadMarketingPlans(updatedUser.id);
         }
       }).catch((err) => {
-        console.error('Auth initialization error:', err);
         setError('Failed to initialize authentication');
       });
     } else if (user && profile?.role === 'agent') {
-      console.log('User authenticated, loading marketing plan:', user.id);
-      loadMarketingPlan(user.id);
+      loadMarketingPlans(user.id);
     } else {
-      console.log('Redirecting to /agent-login due to invalid user/profile');
       navigate('/agent-login');
     }
   }, [user, profile, loading, initializeAuth, navigate]);
 
-  // Load marketing plan from Supabase
-  const loadMarketingPlan = async (agentId: string) => {
+  useEffect(() => {
+    if (!selectedPlanId && marketingPlans.length > 0) {
+      const firstPlan = marketingPlans[0];
+      setSelectedPlanId(firstPlan.id);
+      setMarketingPlanEdit({
+        id: firstPlan.id,
+        suburb: firstPlan.suburb,
+        start_date: firstPlan.start_date,
+        end_date: firstPlan.end_date,
+        submitting: false,
+      });
+      setActivityLog((prev) => ({
+        ...prev,
+        suburb: firstPlan.suburb,
+      }));
+    } else if (!selectedPlanId && !marketingPlans.length) {
+      setMarketingPlanEdit({
+        id: '',
+        suburb: '',
+        start_date: '',
+        end_date: '',
+        submitting: false,
+      });
+    }
+  }, [marketingPlans, selectedPlanId]);
+
+  const loadMarketingPlans = async (agentId: string) => {
+    if (isLoadingPlans || isUpdatingPlan) return;
+    setIsLoadingPlans(true);
     try {
-      console.log('Fetching marketing plan for agent:', agentId);
       setError(null);
+      console.log('Loading marketing plans for agent:', agentId);
       const { data, error } = await supabase
         .from('marketing_plans')
-        .select('agent, suburb, door_knock_streets, phone_call_streets')
+        .select('id, agent, suburb, start_date, end_date, door_knock_streets, phone_call_streets')
         .eq('agent', agentId)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .single();
+        .order('updated_at', { ascending: false });
 
-      if (error && error.code !== 'PGRST116') {
+      if (error) {
         throw new Error(`Supabase error: ${error.message}`);
       }
 
-      if (data) {
-        console.log('Marketing plan loaded:', data);
-        setMarketingPlan(data);
+      const plans: MarketingPlan[] = data.map((plan) => ({
+        id: plan.id,
+        agent: plan.agent,
+        suburb: capitalizeFirstLetter(plan.suburb || ''),
+        start_date: plan.start_date || '',
+        end_date: plan.end_date || '',
+        door_knock_streets: (plan.door_knock_streets || []).map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          why: s.why,
+          house_count: s.house_count,
+          target_knocks: s.target_knocks,
+          target_answers: s.target_answers,
+          desktop_appraisals: s.desktop_appraisals || '0',
+          face_to_face_appraisals: s.face_to_face_appraisals || '0',
+        })),
+        phone_call_streets: (plan.phone_call_streets || []).map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          why: s.why,
+          target_calls: s.target_calls,
+          target_connects: s.target_connects || '0',
+          desktop_appraisals: s.desktop_appraisals || '0',
+          face_to_face_appraisals: s.face_to_face_appraisals || '0',
+        })),
+      }));
+
+      console.log('Loaded marketing plans:', plans);
+
+      setMarketingPlans(plans);
+
+      if (plans.length > 0 && !selectedPlanId) {
+        setSelectedPlanId(plans[0].id);
+        setMarketingPlanEdit({
+          id: plans[0].id,
+          suburb: plans[0].suburb,
+          start_date: plans[0].start_date,
+          end_date: plans[0].end_date,
+          submitting: false,
+        });
         setActivityLog((prev) => ({
           ...prev,
-          suburb: capitalizeFirstLetter(data.suburb || ''),
+          suburb: plans[0].suburb,
         }));
-        const allStreets = [
-          ...data.door_knock_streets.map((s) => s.name),
-          ...data.phone_call_streets.map((s) => s.name),
-        ];
-        if (allStreets.length > 0) {
-          const randomStreet = allStreets[Math.floor(Math.random() * allStreets.length)];
-          console.log('Setting recommended street:', randomStreet);
-          setRecommendedStreet(randomStreet);
-          setActivityLog((prev) => ({
-            ...prev,
-            street_name: randomStreet,
-          }));
-        } else {
-          console.warn('No streets available in marketing plan');
-        }
-      } else {
-        console.warn('No marketing plan found for agent:', agentId);
-        setMarketingPlan(null);
+      } else if (!plans.length) {
+        setSelectedPlanId(null);
+        setMarketingPlanEdit({
+          id: '',
+          suburb: '',
+          start_date: '',
+          end_date: '',
+          submitting: false,
+        });
       }
     } catch (err: any) {
-      console.error('Error loading marketing plan:', err.message);
-      setError('Failed to load marketing plan. Please try again or create one.');
-      toast.error('Failed to load marketing plan');
+      setError('Failed to load marketing plans. Please try again or create one.');
+      toast.error('Failed to load marketing plans');
+    } finally {
+      setIsLoadingPlans(false);
     }
   };
 
-  // Update recommended street when activity type changes
   useEffect(() => {
-    if (marketingPlan) {
-      console.log('Activity type changed to:', activityLog.type);
+    const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
+    if (selectedPlan && !isCustomStreet) {
       let availableStreets: string[] = [];
       if (activityLog.type === 'phone_call') {
-        availableStreets = marketingPlan.phone_call_streets.map((street) => street.name);
+        availableStreets = selectedPlan.phone_call_streets.map((street) => street.name);
       } else if (activityLog.type === 'door_knock') {
-        availableStreets = marketingPlan.door_knock_streets.map((street) => street.name);
+        availableStreets = selectedPlan.door_knock_streets.map((street) => street.name);
       }
       if (availableStreets.length > 0) {
         const randomStreet = availableStreets[Math.floor(Math.random() * availableStreets.length)];
-        console.log('Setting recommended street for', activityLog.type, ':', randomStreet);
         setRecommendedStreet(randomStreet);
         setActivityLog((prev) => ({
           ...prev,
           street_name: randomStreet,
+          suburb: selectedPlan.suburb,
         }));
       } else {
-        console.warn('No available streets for activity type:', activityLog.type);
         setRecommendedStreet(null);
         setActivityLog((prev) => ({
           ...prev,
           street_name: '',
+          suburb: selectedPlan.suburb,
         }));
       }
     }
-  }, [activityLog.type, marketingPlan]);
+  }, [activityLog.type, selectedPlanId, marketingPlans, isCustomStreet]);
 
-  // Validate form inputs
-  const validateForm = () => {
+  const validateActivityForm = () => {
     const newErrors: { [key: string]: string } = {};
-    console.log('Validating form:', activityLog);
 
-    if (!activityLog.suburb.trim()) newErrors.suburb = 'Please select or enter a suburb (e.g., Moggill 4070)';
-    if (!activityLog.street_name.trim()) newErrors.street_name = 'Please enter a street name';
+    if (!activityLog.suburb.trim()) newErrors.suburb = 'Please select a suburb';
+    if (!activityLog.street_name.trim()) newErrors.street_name = 'Please select or enter a street name';
 
     const selectedDateStr = activityLog.date;
     const todayStr = getCurrentUTCDate();
@@ -444,82 +503,226 @@ export function ActivityLogger() {
     }
 
     if (activityLog.type === 'phone_call') {
-      if (
-        activityLog.calls_connected &&
-        (isNaN(parseInt(activityLog.calls_connected)) || parseInt(activityLog.calls_connected) < 0)
-      )
-        newErrors.calls_connected = 'Please enter a number like 0 or 5';
+      if (!activityLog.calls_connected || parseInt(activityLog.calls_connected) <= 0) {
+        newErrors.calls_connected = 'Please enter at least 1 call connected';
+      } else if (isNaN(parseInt(activityLog.calls_connected)) || parseInt(activityLog.calls_connected) < 0) {
+        newErrors.calls_connected = 'Please enter a number like 1 or 5';
+      }
       if (
         activityLog.calls_answered &&
         (isNaN(parseInt(activityLog.calls_answered)) || parseInt(activityLog.calls_answered) < 0)
-      )
+      ) {
         newErrors.calls_answered = 'Please enter a number like 0 or 3';
+      }
       if (
         activityLog.desktop_appraisals &&
         (isNaN(parseInt(activityLog.desktop_appraisals)) || parseInt(activityLog.desktop_appraisals) < 0)
-      )
+      ) {
         newErrors.desktop_appraisals = 'Please enter a number like 0 or 2';
+      }
       if (
         activityLog.face_to_face_appraisals &&
         (isNaN(parseInt(activityLog.face_to_face_appraisals)) || parseInt(activityLog.face_to_face_appraisals) < 0)
-      )
+      ) {
         newErrors.face_to_face_appraisals = 'Please enter a number like 0 or 1';
+      }
       if (
         activityLog.calls_connected &&
         activityLog.calls_answered &&
         parseInt(activityLog.calls_answered) > parseInt(activityLog.calls_connected)
-      )
+      ) {
         newErrors.calls_answered = 'Cannot be more than calls connected';
+      }
     } else if (activityLog.type === 'door_knock') {
-      if (
-        activityLog.knocks_made &&
-        (isNaN(parseInt(activityLog.knocks_made)) || parseInt(activityLog.knocks_made) < 0)
-      )
-        newErrors.knocks_made = 'Please enter a number like 0 or 15';
+      if (!activityLog.knocks_made || parseInt(activityLog.knocks_made) <= 0) {
+        newErrors.knocks_made = 'Please enter at least 1 knock made';
+      } else if (isNaN(parseInt(activityLog.knocks_made)) || parseInt(activityLog.knocks_made) < 0) {
+        newErrors.knocks_made = 'Please enter a number like 1 or 15';
+      }
       if (
         activityLog.knocks_answered &&
         (isNaN(parseInt(activityLog.knocks_answered)) || parseInt(activityLog.knocks_answered) < 0)
-      )
+      ) {
         newErrors.knocks_answered = 'Please enter a number like 0 or 5';
+      }
       if (
         activityLog.desktop_appraisals &&
         (isNaN(parseInt(activityLog.desktop_appraisals)) || parseInt(activityLog.desktop_appraisals) < 0)
-      )
+      ) {
         newErrors.desktop_appraisals = 'Please enter a number like 0 or 2';
+      }
       if (
         activityLog.face_to_face_appraisals &&
         (isNaN(parseInt(activityLog.face_to_face_appraisals)) || parseInt(activityLog.face_to_face_appraisals) < 0)
-      )
+      ) {
         newErrors.face_to_face_appraisals = 'Please enter a number like 0 or 1';
+      }
       if (
         activityLog.knocks_made &&
         activityLog.knocks_answered &&
         parseInt(activityLog.knocks_answered) > parseInt(activityLog.knocks_made)
-      )
+      ) {
         newErrors.knocks_answered = 'Cannot be more than knocks made';
+      }
     }
 
     setErrors(newErrors);
-    console.log('Validation errors:', newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  // Handle form submission
+  const validatePlanForm = () => {
+    const newErrors: { [key: string]: string } = {};
+
+    if (!marketingPlanEdit.id) newErrors.id = 'Please select a marketing plan';
+    if (!marketingPlanEdit.suburb.trim()) newErrors.suburb = 'Please enter a suburb';
+    if (!marketingPlanEdit.start_date) newErrors.start_date = 'Please select a start date';
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(marketingPlanEdit.start_date)) {
+      newErrors.start_date = 'Please enter a valid date (YYYY-MM-DD)';
+    }
+    if (!marketingPlanEdit.end_date) newErrors.end_date = 'Please select an end date';
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(marketingPlanEdit.end_date)) {
+      newErrors.end_date = 'Please enter a valid date (YYYY-MM-DD)';
+    } else if (marketingPlanEdit.end_date < marketingPlanEdit.start_date) {
+      newErrors.end_date = 'End date cannot be before start date';
+    }
+
+    setPlanErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handlePlanSubmit = async () => {
+    if (!validatePlanForm()) {
+      toast.error('Please fix the errors in the marketing plan form before submitting.');
+      return;
+    }
+    setShowConfirm(true);
+  };
+
+  const confirmPlanUpdate = async () => {
+    if (!profile || marketingPlanEdit.submitting || isUpdatingPlan) {
+      toast.error('Unable to update marketing plan. Please ensure you are logged in and try again.');
+      setShowConfirm(false);
+      return;
+    }
+
+    const planId = marketingPlanEdit.id;
+    if (!planId || !marketingPlans.some((plan) => plan.id === planId)) {
+      toast.error('Invalid marketing plan selected. Please select a valid plan.');
+      setShowConfirm(false);
+      return;
+    }
+
+    if (!profile.id) {
+      toast.error('User profile is missing. Please log in again.');
+      setShowConfirm(false);
+      return;
+    }
+
+    setMarketingPlanEdit({ ...marketingPlanEdit, submitting: true });
+    setIsUpdatingPlan(true);
+
+    try {
+      // Pre-check: Verify the plan exists and is unique
+      console.log('Verifying plan exists:', { id: planId, agent: profile.id });
+      const { data: existingPlan, error: fetchError } = await supabase
+        .from('marketing_plans')
+        .select('id, suburb, start_date, end_date,doork_knocks_street,phone_call_streets')
+        .eq('id', planId)
+        .eq('agent', profile.id)
+        .single();
+
+      if (fetchError || !existingPlan) {
+        throw new Error(`Plan with ID ${planId} not found or access denied: ${fetchError?.message || 'No plan found'}`);
+      }
+
+      console.log('Plan found:', existingPlan);
+
+      const updateData = {
+        suburb: capitalizeFirstLetter(marketingPlanEdit.suburb.trim()),
+        start_date: marketingPlanEdit.start_date,
+        end_date: marketingPlanEdit.end_date,
+        updated_at: new Date().toISOString(),
+      };
+
+      console.log('Updating marketing plan:', {
+        id: planId,
+        agent: profile.id,
+        ...updateData,
+      });
+
+      // Perform the update
+      const { data, error: updateError, count } = await supabase
+        .from('marketing_plans')
+        .update(updateData)
+        .eq('id', planId)
+        .eq('agent', profile.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Failed to update marketing plan: ${updateError.message}`);
+      }
+
+      if (!data) {
+        throw new Error('No data returned from update. Please contact support.');
+      }
+
+      console.log('Supabase update successful:', { data, affectedRows: count });
+
+      // Verify only one row was affected
+      if (count !== 1) {
+        console.warn(`Unexpected number of rows updated: ${count}. Expected 1.`);
+      }
+
+      // Update local state for only the specific plan
+      setMarketingPlans((prev) =>
+        prev.map((plan) =>
+          plan.id === planId
+            ? {
+                ...plan,
+                suburb: capitalizeFirstLetter(marketingPlanEdit.suburb.trim()),
+                start_date: marketingPlanEdit.start_date,
+                end_date: marketingPlanEdit.end_date,
+                door_knock_streets: plan.door_knock_streets,
+                phone_call_streets: plan.phone_call_streets,
+              }
+            : plan
+        )
+      );
+
+      // Update activity log suburb only if the updated plan is currently selected
+      if (selectedPlanId === planId) {
+        setActivityLog((prev) => ({
+          ...prev,
+          suburb: capitalizeFirstLetter(marketingPlanEdit.suburb.trim()),
+        }));
+      }
+
+      setSuccess('plan_edit');
+      toast.success('Marketing plan updated successfully!');
+    } catch (err: any) {
+      console.error('Error updating marketing plan:', err);
+      toast.error(`Failed to update marketing plan: ${err.message}`);
+      setError(`Failed to update marketing plan: ${err.message}`);
+    } finally {
+      setMarketingPlanEdit((prev) => ({ ...prev, submitting: false }));
+      setIsUpdatingPlan(false);
+      setShowConfirm(false);
+    }
+  };
+
   const handleActivitySubmit = async () => {
-    if (!validateForm()) {
-      console.log('Form validation failed:', errors);
-      toast.error('Please fix the errors in the form before submitting.');
+    if (!validateActivityForm()) {
+      toast.error('Please fix the errors in the activity form before submitting.');
       return;
     }
 
     const agentId = profile?.id || user?.id;
     if (!profile || !agentId || activityLog.submitting) {
-      console.error('Cannot submit: Missing profile or already submitting', { profile, agentId, submitting: activityLog.submitting });
       toast.error('Unable to log activity. Please ensure you are logged in.');
       return;
     }
 
-    console.log('Submitting activity:', activityLog);
     setActivityLog({ ...activityLog, submitting: true });
 
     try {
@@ -536,7 +739,7 @@ export function ActivityLogger() {
         agency_name: agentData?.agency_name || '',
         activity_type: activityLog.type,
         activity_date: new Date(activityLog.date).toISOString(),
-        street_name: activityLog.street_name.trim(),
+        street_name: capitalizeFirstLetter(activityLog.street_name.trim()),
         suburb: capitalizeFirstLetter(activityLog.suburb.trim()),
         notes: activityLog.notes.trim() || null,
         status: 'Completed',
@@ -554,20 +757,83 @@ export function ActivityLogger() {
         }),
       };
 
-      console.log('Inserting activity into Supabase:', activity);
       const { error: activityError } = await supabase.from('agent_activities').insert([activity]);
 
       if (activityError) throw new Error(`Failed to log activity: ${activityError.message}`);
 
-      console.log('Activity logged successfully');
+      const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
+      if (selectedPlan && !isCustomStreet) {
+        let updatedStreets: PhoneCallStreet[] | DoorKnockStreet[];
+        if (activityLog.type === 'phone_call') {
+          updatedStreets = selectedPlan.phone_call_streets.map((street) =>
+            street.name === activityLog.street_name
+              ? {
+                  ...street,
+                  desktop_appraisals: String(
+                    parseInt(street.desktop_appraisals || '0') +
+                      parseInt(activityLog.desktop_appraisals || '0')
+                  ),
+                  face_to_face_appraisals: String(
+                    parseInt(street.face_to_face_appraisals || '0') +
+                      parseInt(activityLog.face_to_face_appraisals || '0')
+                  ),
+                }
+              : street
+          );
+        } else {
+          updatedStreets = selectedPlan.door_knock_streets.map((street) =>
+            street.name === activityLog.street_name
+              ? {
+                  ...street,
+                  desktop_appraisals: String(
+                    parseInt(street.desktop_appraisals || '0') +
+                      parseInt(activityLog.desktop_appraisals || '0')
+                  ),
+                  face_to_face_appraisals: String(
+                    parseInt(street.face_to_face_appraisals || '0') +
+                      parseInt(activityLog.face_to_face_appraisals || '0')
+                  ),
+                }
+              : street
+          );
+        }
+
+        const updateData =
+          activityLog.type === 'phone_call'
+            ? { phone_call_streets: updatedStreets }
+            : { door_knock_streets: updatedStreets };
+
+        const { error: updateError } = await supabase
+          .from('marketing_plans')
+          .update({
+            ...updateData,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', selectedPlan.id);
+
+        if (updateError) throw new Error(`Failed to update marketing plan: ${updateError.message}`);
+
+        setMarketingPlans((prev) =>
+          prev.map((plan) =>
+            plan.id === selectedPlan.id
+              ? {
+                  ...plan,
+                  ...(activityLog.type === 'phone_call' && { phone_call_streets: updatedStreets as PhoneCallStreet[] }),
+                  ...(activityLog.type === 'door_knock' && { door_knock_streets: updatedStreets as DoorKnockStreet[] }),
+                }
+              : plan
+          )
+        );
+      }
+
       setSuccess(activityLog.type);
       setShowReport(true);
       toast.success('Activity logged successfully!');
 
       setActivityLog({
-        type: 'phone_call',
+        type: activityLog.type,
         street_name: recommendedStreet || '',
-        suburb: marketingPlan?.suburb ? capitalizeFirstLetter(marketingPlan.suburb) : '',
+        suburb: marketingPlans.find((plan) => plan.id === selectedPlanId)?.suburb || '',
         calls_connected: '',
         calls_answered: '',
         knocks_made: '',
@@ -579,9 +845,8 @@ export function ActivityLogger() {
         submitting: false,
       });
       setErrors({});
-      setIsCustomSuburb(false);
+      setIsCustomStreet(false);
     } catch (err: any) {
-      console.error('Activity logging error:', err.message);
       toast.error(`Failed to log activity: ${err.message}`);
       setError(`Failed to log activity: ${err.message}`);
     } finally {
@@ -589,29 +854,16 @@ export function ActivityLogger() {
     }
   };
 
-  // Get available streets based on activity type
   const getAvailableStreets = () => {
-    if (!marketingPlan) return [];
+    const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
+    if (!selectedPlan) return [];
     if (activityLog.type === 'phone_call') {
-      return marketingPlan.phone_call_streets.map((street) => street.name);
+      return selectedPlan.phone_call_streets.map((street) => street.name);
     } else if (activityLog.type === 'door_knock') {
-      return marketingPlan.door_knock_streets.map((street) => street.name);
+      return selectedPlan.door_knock_streets.map((street) => street.name);
     }
     return [];
   };
-
-  console.log('Current state:', {
-    loading,
-    user,
-    profile,
-    error,
-    marketingPlan,
-    activityLog,
-    showReport,
-    success,
-    isCustomSuburb,
-    recommendedStreet,
-  });
 
   if (loading) {
     return <LoadingOverlay message="Loading activity logger..." />;
@@ -671,7 +923,7 @@ export function ActivityLogger() {
     );
   }
 
-  if (!marketingPlan) {
+  if (!marketingPlans.length) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
@@ -729,7 +981,7 @@ export function ActivityLogger() {
           </motion.h1>
 
           <motion.div
-            className="mb-8"
+            className="mb-8 flex gap-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.2 }}
@@ -744,9 +996,21 @@ export function ActivityLogger() {
               <ChevronLeft className="w-4 h-4 mr-2" />
               Back to Dashboard
             </motion.button>
+            <motion.button
+              onClick={() => navigate('/progress-report')}
+              className="flex items-center px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-full hover:from-purple-700 hover:to-purple-800 transition-all shadow-md"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title="View progress report"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              View Progress Report
+            </motion.button>
           </motion.div>
 
-          {recommendedStreet && (
+          {recommendedStreet && !isCustomStreet && (
             <motion.div
               className="mb-8 p-4 bg-blue-100 rounded-lg flex items-center"
               initial={{ opacity: 0 }}
@@ -754,23 +1018,180 @@ export function ActivityLogger() {
               transition={{ duration: 0.5, delay: 0.2 }}
             >
               <p className="text-blue-600">
-                Recommended Street: <strong>{recommendedStreet}</strong> (Suburb: {marketingPlan.suburb})
+                Recommended Street: <strong>{recommendedStreet}</strong> (Suburb:{' '}
+                {marketingPlans.find((plan) => plan.id === selectedPlanId)?.suburb})
               </p>
             </motion.div>
           )}
 
           <motion.div
-            className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 max-w-md hover:shadow-xl transition-all duration-300"
+            className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 max-w-md hover:shadow-xl transition-all duration-300 mb-8"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.4 }}
           >
+            <h2 className="text-2xl font-semibold text-gray-800 mb-6">Edit Marketing Plan</h2>
             <div className="space-y-6">
               <div>
-                <label className="block text-gray-800 font-semibold mb-2">Activity Type</label>
+                <label className="block text-gray-800 font-semibold mb-2">Select Marketing Plan *</label>
+                <select
+                  value={marketingPlanEdit.id}
+                  onChange={(e) => {
+                    const planId = e.target.value;
+                    const plan = marketingPlans.find((p) => p.id === planId);
+                    if (plan) {
+                      setMarketingPlanEdit({
+                        id: plan.id,
+                        suburb: plan.suburb,
+                        start_date: plan.start_date,
+                        end_date: plan.end_date,
+                        submitting: false,
+                      });
+                      setSelectedPlanId(plan.id);
+                      setActivityLog((prev) => ({
+                        ...prev,
+                        suburb: plan.suburb,
+                        street_name: '',
+                      }));
+                      setIsCustomStreet(false);
+                      setRecommendedStreet(null);
+                    } else {
+                      setMarketingPlanEdit({
+                        id: '',
+                        suburb: '',
+                        start_date: '',
+                        end_date: '',
+                        submitting: false,
+                      });
+                      setSelectedPlanId(null);
+                    }
+                  }}
+                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
+                  aria-label="Select marketing plan"
+                >
+                  <option value="">Select a marketing plan</option>
+                  {marketingPlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.suburb} ({new Date(plan.start_date).toLocaleDateString('en-AU')} -{' '}
+                      {new Date(plan.end_date).toLocaleDateString('en-AU')})
+                    </option>
+                  ))}
+                </select>
+                {planErrors.id && (
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {planErrors.id}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-gray-800 font-semibold mb-2">Suburb *</label>
+                <input
+                  type="text"
+                  value={marketingPlanEdit.suburb}
+                  onChange={(e) =>
+                    setMarketingPlanEdit({ ...marketingPlanEdit, suburb: e.target.value })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
+                  placeholder="e.g., Bellbowrie 4070"
+                  aria-label="Enter suburb"
+                />
+                {planErrors.suburb && (
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {planErrors.suburb}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-gray-800 font-semibold mb-2">Start Date *</label>
+                <input
+                  type="date"
+                  value={marketingPlanEdit.start_date}
+                  onChange={(e) =>
+                    setMarketingPlanEdit({ ...marketingPlanEdit, start_date: e.target.value })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
+                  aria-label="Select start date"
+                />
+                {planErrors.start_date && (
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {planErrors.start_date}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-gray-800 font-semibold mb-2">End Date *</label>
+                <input
+                  type="date"
+                  value={marketingPlanEdit.end_date}
+                  onChange={(e) =>
+                    setMarketingPlanEdit({ ...marketingPlanEdit, end_date: e.target.value })
+                  }
+                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
+                  aria-label="Select end date"
+                />
+                {planErrors.end_date && (
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {planErrors.end_date}
+                  </p>
+                )}
+              </div>
+              <motion.button
+                onClick={handlePlanSubmit}
+                disabled={marketingPlanEdit.submitting || !marketingPlanEdit.id || isUpdatingPlan}
+                className="w-full flex items-center justify-center px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-full hover:from-indigo-700 hover:to-indigo-800 transition-all shadow-md disabled:opacity-50 relative"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                title="Update marketing plan"
+              >
+                {marketingPlanEdit.submitting ? (
+                  <svg
+                    className="w-5 h-5 mr-2 animate-spin"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M4 12a8 8 0 1116 0 8 8 0 01-16 0zm8-8v2m0 12v2m8-8h-2m-12 0H2m15.364 5.364l-1.414-1.414M5.05 5.05l1.414 1.414m12.728 0l-1.414 1.414M5.05 18.95l1.414-1.414"
+                    />
+                  </svg>
+                ) : (
+                  <Send className="w-5 h-5 mr-2" />
+                )}
+                {marketingPlanEdit.submitting ? 'Updating...' : 'Update Marketing Plan'}
+                {success === 'plan_edit' && (
+                  <motion.div
+                    className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <CheckCircle className="w-12 h-12 text-green-500" />
+                  </motion.div>
+                )}
+              </motion.button>
+            </div>
+          </motion.div>
+
+          <motion.div
+            className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 max-w-md hover:shadow-xl transition-all duration-300"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.6 }}
+          >
+            <h2 className="text-2xl font-semibold text-gray-800 mb-6">Log Activity</h2>
+            <div className="space-y-6">
+              <div>
+                <label className="block text-gray-800 font-semibold mb-2">Activity Type *</label>
                 <select
                   value={activityLog.type}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setActivityLog({
                       ...activityLog,
                       type: e.target.value as 'phone_call' | 'door_knock',
@@ -781,8 +1202,9 @@ export function ActivityLogger() {
                       knocks_answered: '',
                       desktop_appraisals: '',
                       face_to_face_appraisals: '',
-                    })
-                  }
+                    });
+                    setIsCustomStreet(false);
+                  }}
                   className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                   aria-label="Select activity type"
                 >
@@ -796,62 +1218,50 @@ export function ActivityLogger() {
                   type="date"
                   value={activityLog.date}
                   onChange={(e) => setActivityLog({ ...activityLog, date: e.target.value })}
-                  onBlur={() => validateForm()}
+                  onBlur={() => validateActivityForm()}
                   max={getCurrentUTCDate()}
                   min="2024-01-01"
                   className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                   placeholder="e.g., 2024-04-30"
                   aria-label="Select date"
                 />
-                {errors.date && <p className="text-red-600 text-sm mt-1 font-medium">{errors.date}</p>}
+                {errors.date && (
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {errors.date}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-gray-800 font-semibold mb-2">Suburb *</label>
-                <select
-                  value={isCustomSuburb ? 'custom' : activityLog.suburb}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === 'custom') {
-                      setIsCustomSuburb(true);
-                      setActivityLog({ ...activityLog, suburb: '' });
-                    } else {
-                      setIsCustomSuburb(false);
-                      setActivityLog({ ...activityLog, suburb: value });
-                    }
-                  }}
-                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                  aria-label="Select suburb"
-                >
-                  <option value="">Select a suburb</option>
-                  {suburbs.map((suburb) => (
-                    <option key={suburb} value={suburb}>
-                      {suburb}
-                    </option>
-                  ))}
-                  <option value="custom">Custom Suburb</option>
-                </select>
-                {isCustomSuburb && (
-                  <motion.input
-                    type="text"
-                    value={activityLog.suburb}
-                    onChange={(e) =>
-                      setActivityLog({ ...activityLog, suburb: capitalizeFirstLetter(e.target.value) })
-                    }
-                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50 mt-2"
-                    placeholder="e.g., Moggill 4070"
-                    aria-label="Enter custom suburb"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    transition={{ duration: 0.3 }}
-                  />
+                <input
+                  type="text"
+                  value={activityLog.suburb}
+                  readOnly
+                  className="w-full p-3 border border-gray-200 rounded-lg bg-gray-100"
+                  aria-label="Suburb (read-only)"
+                />
+                {errors.suburb && (
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {errors.suburb}
+                  </p>
                 )}
-                {errors.suburb && <p className="text-red-600 text-sm mt-1 font-medium">{errors.suburb}</p>}
               </div>
               <div>
                 <label className="block text-gray-800 font-semibold mb-2">Street Name *</label>
                 <select
-                  value={activityLog.street_name}
-                  onChange={(e) => setActivityLog({ ...activityLog, street_name: e.target.value })}
+                  value={isCustomStreet ? 'custom' : activityLog.street_name}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'custom') {
+                      setIsCustomStreet(true);
+                      setActivityLog({ ...activityLog, street_name: '' });
+                    } else {
+                      setIsCustomStreet(false);
+                      setActivityLog({ ...activityLog, street_name: value });
+                    }
+                  }}
                   className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                   aria-label="Select street name"
                 >
@@ -861,27 +1271,54 @@ export function ActivityLogger() {
                       {street}
                     </option>
                   ))}
+                  <option value="custom">Custom Street</option>
                 </select>
+                {isCustomStreet && (
+                  <motion.input
+                    type="text"
+                    value={activityLog.street_name}
+                    onChange={(e) =>
+                      setActivityLog({
+                        ...activityLog,
+                        street_name: capitalizeFirstLetter(e.target.value),
+                      })
+                    }
+                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50 mt-2"
+                    placeholder="e.g., Main Street"
+                    aria-label="Enter custom street name"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ duration: 0.3 }}
+                  />
+                )}
                 {errors.street_name && (
-                  <p className="text-red-600 text-sm mt-1 font-medium">{errors.street_name}</p>
+                  <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                    <AlertCircle className="w-4 h-4 mr-1" />
+                    {errors.street_name}
+                  </p>
                 )}
               </div>
               {activityLog.type === 'phone_call' && (
                 <>
                   <div>
-                    <label className="block text-gray-800 font-semibold mb-2">Calls Connected</label>
+                    <label className="block text-gray-800 font-semibold mb-2">Calls Connected *</label>
                     <input
                       type="number"
                       value={activityLog.calls_connected}
-                      onChange={(e) => setActivityLog({ ...activityLog, calls_connected: e.target.value })}
+                      onChange={(e) =>
+                        setActivityLog({ ...activityLog, calls_connected: e.target.value })
+                      }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 3"
-                      min="0"
+                      min="1"
                       step="1"
                       aria-label="Enter calls connected"
                     />
                     {errors.calls_connected && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.calls_connected}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.calls_connected}
+                      </p>
                     )}
                   </div>
                   <div>
@@ -889,7 +1326,9 @@ export function ActivityLogger() {
                     <input
                       type="number"
                       value={activityLog.calls_answered}
-                      onChange={(e) => setActivityLog({ ...activityLog, calls_answered: e.target.value })}
+                      onChange={(e) =>
+                        setActivityLog({ ...activityLog, calls_answered: e.target.value })
+                      }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 2"
                       min="0"
@@ -897,7 +1336,10 @@ export function ActivityLogger() {
                       aria-label="Enter calls answered"
                     />
                     {errors.calls_answered && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.calls_answered}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.calls_answered}
+                      </p>
                     )}
                   </div>
                   <div>
@@ -905,7 +1347,9 @@ export function ActivityLogger() {
                     <input
                       type="number"
                       value={activityLog.desktop_appraisals}
-                      onChange={(e) => setActivityLog({ ...activityLog, desktop_appraisals: e.target.value })}
+                      onChange={(e) =>
+                        setActivityLog({ ...activityLog, desktop_appraisals: e.target.value })
+                      }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 2"
                       min="0"
@@ -913,16 +1357,24 @@ export function ActivityLogger() {
                       aria-label="Enter desktop appraisals"
                     />
                     {errors.desktop_appraisals && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.desktop_appraisals}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.desktop_appraisals}
+                      </p>
                     )}
                   </div>
                   <div>
-                    <label className="block text-gray-800 font-semibold mb-2">Face-to-Face Appraisals</label>
+                    <label className="block text-gray-800 font-semibold mb-2">
+                      Face-to-Face Appraisals
+                    </label>
                     <input
                       type="number"
                       value={activityLog.face_to_face_appraisals}
                       onChange={(e) =>
-                        setActivityLog({ ...activityLog, face_to_face_appraisals: e.target.value })
+                        setActivityLog({
+                          ...activityLog,
+                          face_to_face_appraisals: e.target.value,
+                        })
                       }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 1"
@@ -931,7 +1383,10 @@ export function ActivityLogger() {
                       aria-label="Enter face-to-face appraisals"
                     />
                     {errors.face_to_face_appraisals && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.face_to_face_appraisals}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.face_to_face_appraisals}
+                      </p>
                     )}
                   </div>
                 </>
@@ -939,19 +1394,24 @@ export function ActivityLogger() {
               {activityLog.type === 'door_knock' && (
                 <>
                   <div>
-                    <label className="block text-gray-800 font-semibold mb-2">Knocks Made</label>
+                    <label className="block text-gray-800 font-semibold mb-2">Knocks Made *</label>
                     <input
                       type="number"
                       value={activityLog.knocks_made}
-                      onChange={(e) => setActivityLog({ ...activityLog, knocks_made: e.target.value })}
+                      onChange={(e) =>
+                        setActivityLog({ ...activityLog, knocks_made: e.target.value })
+                      }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 15"
-                      min="0"
+                      min="1"
                       step="1"
                       aria-label="Enter knocks made"
                     />
                     {errors.knocks_made && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.knocks_made}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.knocks_made}
+                      </p>
                     )}
                   </div>
                   <div>
@@ -959,7 +1419,9 @@ export function ActivityLogger() {
                     <input
                       type="number"
                       value={activityLog.knocks_answered}
-                      onChange={(e) => setActivityLog({ ...activityLog, knocks_answered: e.target.value })}
+                      onChange={(e) =>
+                        setActivityLog({ ...activityLog, knocks_answered: e.target.value })
+                      }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 5"
                       min="0"
@@ -967,7 +1429,10 @@ export function ActivityLogger() {
                       aria-label="Enter knocks answered"
                     />
                     {errors.knocks_answered && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.knocks_answered}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.knocks_answered}
+                      </p>
                     )}
                     {activityLog.knocks_made && (
                       <div className="w-full h-2 bg-gray-200 rounded-full mt-2">
@@ -990,7 +1455,9 @@ export function ActivityLogger() {
                     <input
                       type="number"
                       value={activityLog.desktop_appraisals}
-                      onChange={(e) => setActivityLog({ ...activityLog, desktop_appraisals: e.target.value })}
+                      onChange={(e) =>
+                        setActivityLog({ ...activityLog, desktop_appraisals: e.target.value })
+                      }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 2"
                       min="0"
@@ -998,16 +1465,24 @@ export function ActivityLogger() {
                       aria-label="Enter desktop appraisals"
                     />
                     {errors.desktop_appraisals && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.desktop_appraisals}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.desktop_appraisals}
+                      </p>
                     )}
                   </div>
                   <div>
-                    <label className="block text-gray-800 font-semibold mb-2">Face-to-Face Appraisals</label>
+                    <label className="block text-gray-800 font-semibold mb-2">
+                      Face-to-Face Appraisals
+                    </label>
                     <input
                       type="number"
                       value={activityLog.face_to_face_appraisals}
                       onChange={(e) =>
-                        setActivityLog({ ...activityLog, face_to_face_appraisals: e.target.value })
+                        setActivityLog({
+                          ...activityLog,
+                          face_to_face_appraisals: e.target.value,
+                        })
                       }
                       className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                       placeholder="e.g., 1"
@@ -1016,7 +1491,10 @@ export function ActivityLogger() {
                       aria-label="Enter face-to-face appraisals"
                     />
                     {errors.face_to_face_appraisals && (
-                      <p className="text-red-600 text-sm mt-1 font-medium">{errors.face_to_face_appraisals}</p>
+                      <p className="text-red-600 text-sm mt-1 font-medium flex items-center">
+                        <AlertCircle className="w-4 h-4 mr-1" />
+                        {errors.face_to_face_appraisals}
+                      </p>
                     )}
                   </div>
                 </>
@@ -1041,14 +1519,24 @@ export function ActivityLogger() {
                 title="Log activity"
               >
                 {activityLog.submitting ? (
-                  <svg className="w-5 h-5 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 12a8 8 0 1116 0 8 8 0 01-16 0zm8-8v2m0 12v2m8-8h-2m-12 0H2m15.364 5.364l-1.414-1.414M5.05 5.05l1.414 1.414m12.728 0l-1.414 1.414M5.05 18.95l1.414-1.414" />
+                  <svg
+                    className="w-5 h-5 mr-2 animate-spin"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M4 12a8 8 0 1116 0 8 8 0 01-16 0zm8-8v2m0 12v2m8-8h-2m-12 0H2m15.364 5.364l-1.414-1.414M5.05 5.05l1.414 1.414m12.728 0l-1.414 1.414M5.05 18.95l1.414-1.414"
+                    />
                   </svg>
                 ) : (
                   <Send className="w-5 h-5 mr-2" />
                 )}
                 {activityLog.submitting ? 'Logging...' : 'Log Activity'}
-                {success && (
+                {(success === 'phone_call' || success === 'door_knock') && (
                   <motion.div
                     className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
                     initial={{ scale: 0 }}
@@ -1062,6 +1550,36 @@ export function ActivityLogger() {
               <p className="text-sm text-gray-500">* Required field</p>
             </div>
           </motion.div>
+
+          {showConfirm && (
+            <motion.div
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="bg-white p-6 rounded-lg max-w-md w-full">
+                <h3 className="text-lg font-semibold mb-4">Confirm Update</h3>
+                <p className="mb-4">
+                  Are you sure you want to update the marketing plan for {marketingPlanEdit.suburb}?
+                </p>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setShowConfirm(false)}
+                    className="flex-1 px-4 py-2 bg-gray-200 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmPlanUpdate}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </div>
       </div>
     </ErrorBoundary>

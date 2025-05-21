@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Home } from './pages/Home';
+import { AdminDashboard } from './pages/AdminDashboard';
 import { PropertyForm } from './pages/PropertyForm';
 import { PropertyList } from './pages/PropertyList';
 import { PropertyDetail } from './pages/PropertyDetail';
@@ -99,6 +100,7 @@ function App() {
             <Route path="/agent-register" element={<AgentRegister />} />
             <Route path="/progress-report" element={<ProgressReportPage />} />
             <Route path="/comparisons" element={<ComparisonReport />} />
+            <Route path="/admin" element={<AdminDashboard />} />
             <Route
               path="/agent-dashboard"
               element={

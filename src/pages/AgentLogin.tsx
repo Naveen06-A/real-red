@@ -3,7 +3,7 @@ import { useNavigate, useLocation, Link, Navigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { Lock, Mail, AlertCircle, CheckCircle, LogIn, Loader2 } from 'lucide-react';
-import { Navigation } from './components/Navigation';
+import { Navigation } from '../components/Navigation';
 
 export function AgentLogin() {
   const [formData, setFormData] = useState({ email: '', password: '' });
