@@ -107,21 +107,8 @@ function ActivityLogReport({
     return `${weekday}, ${day} ${month} ${year}`; // Outputs e.g., "Wednesday, 21 May 2025"
   };
 
-  // Hardcoded test data to ensure exact output
-  const testLog: ActivityLog = {
-    type: 'door_knock',
-    street_name: 'Main Street',
-    suburb: 'Bellbowrie 4070',
-    date: '2025-05-21',
-    knocks_made: '15',
-    knocks_answered: '5',
-    desktop_appraisals: '2',
-    face_to_face_appraisals: '1',
-    notes: 'Spoke to two homeowners',
-  };
-
-  // Use testLog for testing; switch to `log` for production
-  const displayLog = testLog; // TODO: Change to `log` after confirming output
+  // Use the log prop directly
+  const displayLog = log;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -324,7 +311,7 @@ export function ActivityLogger() {
 
   const [activityLog, setActivityLog] = useState<ActivityLog>({
     type: 'door_knock',
-    street_name: 'Main Street', // Default to desired street
+    street_name: 'Main Street',
     suburb: '',
     calls_connected: '',
     calls_answered: '',
@@ -341,7 +328,7 @@ export function ActivityLogger() {
   const [marketingPlans, setMarketingPlans] = useState<MarketingPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
-  const [isCustomStreet, setIsCustomStreet] = useState(true); // Default to custom for Main Street
+  const [isCustomStreet, setIsCustomStreet] = useState(true);
   const [recommendedStreet, setRecommendedStreet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
@@ -456,7 +443,7 @@ export function ActivityLogger() {
         setRecommendedStreet(null);
         setActivityLog((prev) => ({
           ...prev,
-          street_name: 'Main Street', // Fallback to Main Street
+          street_name: 'Main Street',
           suburb: selectedPlan.suburb,
         }));
       }
@@ -554,7 +541,6 @@ export function ActivityLogger() {
   };
 
   const handleActivitySubmit = async () => {
-    // Debug: Log the activityLog state before validation
     console.log('Submitting activityLog:', activityLog);
 
     if (!validateActivityForm()) {
@@ -602,7 +588,6 @@ export function ActivityLogger() {
         }),
       };
 
-      // Debug: Log the activity object being sent to Supabase
       console.log('Activity to Supabase:', activity);
 
       const { error: activityError } = await supabase.from('agent_activities').insert([activity]);
@@ -674,10 +659,27 @@ export function ActivityLogger() {
         );
       }
 
+      // Store the submitted log before resetting
+      const submittedLog: ActivityLog = {
+        type: activityLog.type,
+        street_name: capitalizeFirstLetter(activityLog.street_name.trim()),
+        suburb: activityLog.suburb.trim(),
+        date: activityLog.date,
+        calls_connected: activityLog.calls_connected,
+        calls_answered: activityLog.calls_answered,
+        knocks_made: activityLog.knocks_made,
+        knocks_answered: activityLog.knocks_answered,
+        desktop_appraisals: activityLog.desktop_appraisals,
+        face_to_face_appraisals: activityLog.face_to_face_appraisals,
+        notes: activityLog.notes.trim() || 'No notes provided',
+        submitting: false,
+      };
+
       setSuccess(activityLog.type);
       setShowReport(true);
       toast.success('Activity logged successfully!');
 
+      // Reset the form
       setActivityLog({
         type: activityLog.type,
         street_name: 'Main Street',
@@ -693,7 +695,10 @@ export function ActivityLogger() {
         submitting: false,
       });
       setErrors({});
-      setIsCustomStreet(true); // Keep custom street for Main Street
+      setIsCustomStreet(true);
+
+      // Set activityLog to submittedLog for the report
+      setActivityLog(submittedLog);
     } catch (err: any) {
       toast.error(`Failed to log activity: ${err.message}`);
       setError(`Failed to log activity: ${err.message}`);
@@ -801,7 +806,6 @@ export function ActivityLogger() {
   }
 
   if (showReport) {
-    // Debug: Log the activityLog before rendering report
     console.log('Rendering ActivityLogReport with log:', activityLog);
     return (
       <ActivityLogReport
@@ -932,17 +936,15 @@ export function ActivityLogger() {
                   value={activityLog.type}
                   onChange={(e) => {
                     setActivityLog({
-                      ...prev => ({
-                        ...prev,
-                        type: e.target.value as 'phone_call' | 'door_knock',
-                        street_name: 'Main Street', // Reset to Main Street
-                        calls_connected: '',
-                        calls_answered: '',
-                        knocks_made: '',
-                        knocks_answered: '',
-                        desktop_appraisals: '',
-                        face_to_face_appraisals: '',
-                      })
+                      ...activityLog,
+                      type: e.target.value as 'phone_call' | 'door_knock',
+                      street_name: 'Main Street',
+                      calls_connected: '',
+                      calls_answered: '',
+                      knocks_made: '',
+                      knocks_answered: '',
+                      desktop_appraisals: '',
+                      face_to_face_appraisals: '',
                     });
                     setIsCustomStreet(true);
                     validateActivityForm();

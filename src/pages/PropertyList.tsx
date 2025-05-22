@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, MapPin, DollarSign } from 'lucide-react';
@@ -19,6 +19,7 @@ export function PropertyList() {
           .from('properties')
           .select('*')
           .eq('category', 'Listing')
+          .not('id', 'is', null)
           .order('listed_date', { ascending: false });
 
         if (error) throw error;
@@ -35,11 +36,21 @@ export function PropertyList() {
   }, []);
 
   const handlePropertyClick = (property: Property) => {
+    if (!property.id) {
+      toast.error('Property ID is missing');
+      return;
+    }
     navigate(`/property-detail/${property.id}`, { state: { property } });
   };
 
-  const handleViewPrediction = (property: Property) => {
-    navigate(`/property-prediction/${property.id}`, { state: { liveData: property } });
+  const getAddress = (property: Property) => {
+    const streetNumber = property.street_number || '';
+    const streetName = property.street_name || '';
+    const suburb = property.suburb || '';
+    
+    return `${streetNumber} ${streetName}`.trim() 
+      ? `${streetNumber} ${streetName}, ${suburb}`
+      : suburb;
   };
 
   return (
@@ -59,31 +70,24 @@ export function PropertyList() {
           {properties.map((property) => (
             <div
               key={property.id}
-              className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow"
+              className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => handlePropertyClick(property)}
             >
-              <div onClick={() => handlePropertyClick(property)} className="cursor-pointer">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  {`${property.street_number || ''} ${property.street_name || ''}, ${property.suburb}`}
-                </h2>
-                <p className="text-gray-600 flex items-center mb-1">
-                  <MapPin className="w-4 h-4 mr-1" />
-                  {property.suburb}, QLD {property.postcode}
-                </p>
-                <p className="text-gray-600 flex items-center mb-1">
-                  <DollarSign className="w-4 h-4 mr-1" />
-                  {formatCurrency(property.price)}
-                </p>
-                <p className="text-gray-600 mb-1">
-                  {property.bedrooms} Beds, {property.bathrooms} Baths, {property.car_garage} Garage
-                </p>
-                <p className="text-sm text-blue-600">{property.category}</p>
-              </div>
-              <button
-                onClick={() => handleViewPrediction(property)}
-                className="mt-2 text-blue-600 hover:underline"
-              >
-                View Prediction
-              </button>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                {getAddress(property)}
+              </h2>
+              <p className="text-gray-600 flex items-center mb-1">
+                <MapPin className="w-4 h-4 mr-1" />
+                {property.suburb || 'Location not specified'}, QLD {property.postcode || ''}
+              </p>
+              <p className="text-gray-600 flex items-center mb-1">
+                <DollarSign className="w-4 h-4 mr-1" />
+                {property.price ? formatCurrency(property.price) : 'Price not available'}
+              </p>
+              <p className="text-gray-600 mb-1">
+                {property.bedrooms || 0} Beds, {property.bathrooms || 0} Baths, {property.car_garage || 0} Garage
+              </p>
+              <p className="text-sm text-blue-600">{property.category || 'Uncategorized'}</p>
             </div>
           ))}
         </div>

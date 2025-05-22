@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
-import { Building, Trash2, Bell, Download, Filter } from 'lucide-react';
+import { Building, Trash2, Bell, Download, Filter, Copy } from 'lucide-react';
 import { Property, StaticProperty, combineProperties, sortProperties, staticProperties } from '../data/PropertyData';
 import toast, { Toaster } from 'react-hot-toast';
 import { Link } from 'react-router-dom';
@@ -9,6 +9,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { CSVLink } from 'react-csv';
 import { Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import { motion, AnimatePresence } from 'framer-motion';
+// import styles from './AdminDashboard.module.css';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -32,14 +34,21 @@ interface PropertyFilter {
   search?: string;
 }
 
+interface ActivityLog {
+  id: string;
+  agent_id: string;
+  action: string;
+  property_id?: string;
+  details?: { property_name?: string };
+  created_at: string;
+}
+
 export function AdminDashboard() {
   const { profile } = useAuthStore() as { profile: Agent | null };
-  // Stores raw properties from Supabase, used to derive combinedProperties
   const [supabaseProperties, setSupabaseProperties] = useState<Property[]>([]);
-  // Stores combined static and Supabase properties
   const [combinedProperties, setCombinedProperties] = useState<(Property | StaticProperty)[]>([]);
-  // Stores filtered properties for display
   const [filteredProperties, setFilteredProperties] = useState<(Property | StaticProperty)[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: keyof Property | null; direction: 'asc' | 'desc' }>({
@@ -48,16 +57,27 @@ export function AdminDashboard() {
   });
   const [notifications, setNotifications] = useState<string[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  // Stores filter criteria for properties
   const [filters, setFilters] = useState<PropertyFilter>({});
   const [newAgentId, setNewAgentId] = useState<string | null>(null);
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [agentForm, setAgentForm] = useState({
+    email: '',
+    role: 'agent',
+    permissions: {
+      canRegisterProperties: true,
+      canEditProperties: true,
+      canDeleteProperties: true,
+      canManageAgents: true,
+    },
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
   useEffect(() => {
     fetchProperties();
     fetchNotifications();
-    // setupWebSocket(); // Disabled for testing, re-enable with valid WebSocket URL
+    fetchActivityLogs();
+    // setupWebSocket(); // Uncomment and configure with valid WebSocket URL
   }, []);
 
   const setupWebSocket = useCallback(() => {
@@ -71,11 +91,7 @@ export function AdminDashboard() {
           toast.success(message.content, {
             duration: 4000,
             position: 'top-right',
-            style: {
-              background: '#10B981',
-              color: '#fff',
-              borderRadius: '8px',
-            },
+            style: { background: '#10B981', color: '#fff', borderRadius: '8px' },
           });
         } catch (err) {
           console.error('WebSocket message error:', err);
@@ -110,6 +126,21 @@ export function AdminDashboard() {
     }
   }, [profile?.id]);
 
+  const fetchActivityLogs = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      setActivityLogs(data || []);
+    } catch (err: any) {
+      console.error('Fetch activity logs error:', err.message);
+      toast.error('Failed to fetch activity logs');
+    }
+  }, []);
+
   const fetchProperties = useCallback(async () => {
     try {
       setLoading(true);
@@ -118,7 +149,6 @@ export function AdminDashboard() {
         .from('properties')
         .select('*')
         .order('created_at', { ascending: false });
-
       if (error) throw error;
       setSupabaseProperties(data || []);
       const combined = combineProperties(data || [], staticProperties);
@@ -127,7 +157,6 @@ export function AdminDashboard() {
     } catch (err: any) {
       console.error('Fetch properties error:', err.message);
       setError('Failed to fetch properties: ' + err.message);
-      // Fallback to static properties
       setCombinedProperties(staticProperties);
       setFilteredProperties(staticProperties);
       toast.error('Failed to fetch properties, showing static data');
@@ -142,47 +171,72 @@ export function AdminDashboard() {
         .from('properties')
         .delete()
         .eq('id', id);
-
       if (error) throw error;
-
       await supabase.from('activity_logs').insert({
         agent_id: profile?.id,
         action: 'delete_property',
         property_id: id,
         details: { property_name: combinedProperties.find((p) => p.id === id)?.name },
       });
-
       setSupabaseProperties((prev) => prev.filter((property) => property.id !== id));
       setCombinedProperties((prev) => prev.filter((property) => property.id !== id));
       setFilteredProperties((prev) => prev.filter((property) => property.id !== id));
       toast.success('Property deleted successfully');
+      fetchActivityLogs();
     } catch (err: any) {
       console.error('Delete property error:', err.message);
       toast.error('Failed to delete property: ' + err.message);
     }
-  }, [profile?.id, combinedProperties]);
+  }, [profile?.id, combinedProperties, fetchActivityLogs]);
 
-  const generateAgentId = useCallback(async () => {
+  const createAgent = useCallback(async () => {
     try {
       const newId = uuidv4();
-      setNewAgentId(newId);
-      await supabase.from('agents').insert({
+      const { email, role, permissions } = agentForm;
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error('Invalid email address');
+      }
+      const { error } = await supabase.from('agents').insert({
         id: newId,
-        email: 'pending@agent.com',
+        email,
+        role,
+        permissions,
+      });
+      if (error) throw error;
+      setNewAgentId(newId);
+      setShowAgentModal(false);
+      setAgentForm({
+        email: '',
         role: 'agent',
         permissions: {
           canRegisterProperties: true,
           canEditProperties: true,
-          canDeleteProperties: false,
-          canManageAgents: false,
+          canDeleteProperties: true,
+          canManageAgents: true,
         },
       });
-      toast.success(`New Agent ID: ${newId}`);
+      await supabase.from('notifications').insert({
+        content: `New agent created: ${email} (ID: ${newId})`,
+        agent_id: profile?.id,
+      });
+      fetchNotifications();
+      fetchActivityLogs();
+      toast.success(`Agent created: ${email} (ID: ${newId})`, {
+        duration: 5000,
+        style: { background: '#3B82F6', color: '#fff', borderRadius: '8px' },
+      });
     } catch (err: any) {
-      console.error('Generate agent ID error:', err.message);
-      toast.error('Failed to generate agent ID: ' + err.message);
+      console.error('Create agent error:', err.message);
+      toast.error('Failed to create agent: ' + err.message);
     }
-  }, []);
+  }, [agentForm, profile?.id, fetchNotifications, fetchActivityLogs]);
+
+  const copyAgentId = useCallback(() => {
+    if (newAgentId) {
+      navigator.clipboard.writeText(newAgentId);
+      toast.success('Agent ID copied to clipboard');
+    }
+  }, [newAgentId]);
 
   const handleSort = useCallback((key: keyof Property) => {
     setSortConfig((prev) => {
@@ -307,33 +361,43 @@ export function AdminDashboard() {
                 </span>
               )}
             </button>
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl z-10 animate-slide-down" role="region" aria-label="Notifications">
-                <div className="p-4">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
-                    <button
-                      onClick={clearNotifications}
-                      className="text-sm text-blue-600 hover:text-blue-800 focus:outline-none focus:underline"
-                      aria-label="Clear all notifications"
-                    >
-                      Clear All
-                    </button>
+            <AnimatePresence>
+              {showNotifications && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3, ease: 'easeOut' }}
+                  className={`${styles.animateSlideDown} absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl z-10 backdrop-blur-md bg-opacity-90`}
+                  role="region"
+                  aria-label="Notifications"
+                >
+                  <div className="p-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
+                      <button
+                        onClick={clearNotifications}
+                        className="text-sm text-blue-600 hover:text-blue-800 focus:outline-none focus:underline"
+                        aria-label="Clear all notifications"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    {notifications.length === 0 ? (
+                      <p className="text-sm text-gray-500">No new notifications</p>
+                    ) : (
+                      <ul className="mt-2 space-y-2 max-h-60 overflow-y-auto" aria-live="polite">
+                        {notifications.map((notification, index) => (
+                          <li key={index} className="text-sm text-gray-600 p-2 rounded hover:bg-gray-50">
+                            {notification}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  {notifications.length === 0 ? (
-                    <p className="text-sm text-gray-500">No new notifications</p>
-                  ) : (
-                    <ul className="mt-2 space-y-2 max-h-60 overflow-y-auto" aria-live="polite">
-                      {notifications.map((notification, index) => (
-                        <li key={index} className="text-sm text-gray-600 p-2 rounded hover:bg-gray-50">
-                          {notification}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
           <div className="flex items-center space-x-2">
             <Building className="w-6 h-6 text-blue-600" aria-hidden="true" />
@@ -342,11 +406,11 @@ export function AdminDashboard() {
           {profile?.permissions.canManageAgents && (
             <>
               <button
-                onClick={generateAgentId}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-green-600"
-                aria-label="Generate new agent ID"
+                onClick={() => setShowAgentModal(true)}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors focus:outline-none focus:ring-2 focus:ring-green-600"
+                aria-label="Create new agent"
               >
-                Generate Agent ID
+                Create Agent
               </button>
               <Link
                 to="/agent-management"
@@ -369,6 +433,112 @@ export function AdminDashboard() {
         </div>
       </div>
 
+      {/* Agent Creation Modal */}
+      <AnimatePresence>
+        {showAgentModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            role="dialog"
+            aria-label="Create new agent"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              className="bg-white rounded-lg p-6 w-full max-w-md backdrop-blur-md bg-opacity-90 shadow-2xl"
+            >
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Create New Agent</h2>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="agent-email" className="block text-sm font-medium text-gray-700">
+                    Email
+                  </label>
+                  <input
+                    id="agent-email"
+                    type="email"
+                    value={agentForm.email}
+                    onChange={(e) => setAgentForm({ ...agentForm, email: e.target.value })}
+                    className="mt-1 block w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    placeholder="agent@example.com"
+                    aria-required="true"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Permissions</label>
+                  <div className="mt-2 space-y-2">
+                    {Object.keys(agentForm.permissions).map((key) => (
+                      <label key={key} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={agentForm.permissions[key as keyof typeof agentForm.permissions]}
+                          onChange={(e) =>
+                            setAgentForm({
+                              ...agentForm,
+                              permissions: {
+                                ...agentForm.permissions,
+                                [key]: e.target.checked,
+                              },
+                            })
+                          }
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-600 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-600">
+                          {key.replace('can', '').replace(/([A-Z])/g, ' $1').trim()}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end space-x-2">
+                <button
+                  onClick={() => setShowAgentModal(false)}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-600"
+                  aria-label="Cancel agent creation"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={createAgent}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  aria-label="Create agent"
+                >
+                  Create
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* New Agent ID Display */}
+      {newAgentId && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 p-4 bg-blue-50 rounded-lg flex items-center justify-between"
+          role="alert"
+        >
+          <div>
+            <h3 className="text-sm font-semibold text-blue-900">New Agent ID</h3>
+            <p className="text-sm text-blue-700">{newAgentId}</p>
+          </div>
+          <button
+            onClick={copyAgentId}
+            className="flex items-center px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600"
+            aria-label="Copy agent ID"
+          >
+            <Copy className="w-4 h-4 mr-1" />
+            Copy
+          </button>
+        </motion.div>
+      )}
+
       {/* Dashboard Widgets */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow" role="region" aria-label="Total properties">
@@ -387,8 +557,24 @@ export function AdminDashboard() {
         </div>
         <div className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow" role="region" aria-label="New agent ID">
           <h3 className="text-lg font-semibold text-gray-900">New Agent ID</h3>
-          <p className="text-sm text-gray-600 truncate">{newAgentId || 'Click to generate'}</p>
+          <p className="text-sm text-gray-600 truncate">{newAgentId || 'Click to create'}</p>
         </div>
+      </div>
+
+      {/* Agent Activity Logs */}
+      <div className="bg-white p-6 rounded-lg shadow-md mb-8" role="region" aria-label="Agent activity logs">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Agent Activity Logs</h3>
+        {activityLogs.length === 0 ? (
+          <p className="text-sm text-gray-500">No recent activity</p>
+        ) : (
+          <ul className="space-y-2 max-h-60 overflow-y-auto">
+            {activityLogs.map((log) => (
+              <li key={log.id} className="text-sm text-gray-600 p-2 rounded hover:bg-gray-50">
+                <span className="font-medium">Agent {log.agent_id}</span> {log.action.replace('_', ' ')}: {log.details?.property_name || 'N/A'} on {new Date(log.created_at).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Price Distribution Chart */}
@@ -420,29 +606,12 @@ export function AdminDashboard() {
           options={{
             responsive: true,
             scales: {
-              y: {
-                beginAtZero: true,
-                title: {
-                  display: true,
-                  text: 'Number of Properties',
-                },
-              },
-              x: {
-                title: {
-                  display: true,
-                  text: 'Price Range',
-                },
-              },
+              y: { beginAtZero: true, title: { display: true, text: 'Number of Properties' } },
+              x: { title: { display: true, text: 'Price Range' } },
             },
             plugins: {
-              legend: {
-                display: false,
-              },
-              tooltip: {
-                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                titleFont: { size: 14 },
-                bodyFont: { size: 12 },
-              },
+              legend: { display: false },
+              tooltip: { backgroundColor: 'rgba(0, 0, 0, 0.8)', titleFont: { size: 14 }, bodyFont: { size: 12 } },
             },
           }}
         />
@@ -622,22 +791,6 @@ export function AdminDashboard() {
           </button>
         </div>
       </div>
-
-      <style jsx>{`
-        .animate-slide-down {
-          animation: slideDown 0.3s ease-out;
-        }
-        @keyframes slideDown {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
     </div>
   );
 }

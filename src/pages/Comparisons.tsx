@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, RefreshCw, Moon, Sun, ChevronDown, ChevronUp, Chevr
 import { toast } from 'react-toastify';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
-import { normalizeSuburb } from '../utils/suburbUtils';
+import { normalizeSuburb } from '../utils/subrubUtils';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
