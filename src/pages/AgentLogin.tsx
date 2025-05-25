@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Link, Navigate } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { Lock, Mail, AlertCircle, CheckCircle, LogIn, Loader2 } from 'lucide-react';
-import { Navigation } from '../components/Navigation';
 
 export function AgentLogin() {
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -12,12 +11,13 @@ export function AgentLogin() {
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, initializeAuth, loading: authLoading } = useAuthStore();
+  const { user, profile, initializeAuth, fetchProfile, loading: authLoading } = useAuthStore();
   const successMessage = location.state?.message;
 
   // Redirect if already logged in as agent
   useEffect(() => {
     if (user && profile?.role === 'agent') {
+      console.log('Redirecting to agent-dashboard: User and profile verified', { user, profile });
       navigate('/agent-dashboard');
     }
   }, [user, profile, navigate]);
@@ -35,22 +35,62 @@ export function AgentLogin() {
     setLoading(true);
 
     try {
+      // Test Supabase connectivity
+      const { data: testQuery, error: testError } = await supabase.from('profiles').select('count').limit(1);
+      console.log('Supabase connectivity test:', { testQuery, testError });
+      if (testError) throw new Error(`Supabase connectivity error: ${testError.message}`);
+
+      // Sign in with Supabase
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
       });
-      if (signInError) throw signInError;
+      console.log('Auth Response:', { user: data?.user, session: data?.session, error: signInError });
+
+      if (signInError) throw new Error(signInError.message || 'Invalid email or password.');
       if (!data.user) throw new Error('No user data returned from login.');
 
+      // Initialize auth and fetch profile
+      console.log('Initializing auth for user:', data.user.id);
       await initializeAuth();
-      const currentProfile = useAuthStore.getState().profile;
-      if (currentProfile?.role === 'agent') {
+      let currentProfile = useAuthStore.getState().profile;
+
+      // Direct fetch if profile is null
+      if (!currentProfile) {
+        console.log('Profile not found after initializeAuth, attempting direct fetch...');
+        await fetchProfile();
+        currentProfile = useAuthStore.getState().profile;
+      }
+
+      console.log('Fetched Profile:', currentProfile);
+
+      if (!currentProfile) {
+        throw new Error(
+          'Profile not found. Verify that the profiles table has a row with id matching the user ID from auth.users. ' +
+          'Ensure read permissions are set for authenticated users. Register at /agent-register or contact support.'
+        );
+      }
+
+      if (currentProfile.role === 'agent') {
+        console.log('Role verified as agent, navigating to dashboard');
         navigate('/agent-dashboard');
       } else {
-        throw new Error('This page is for agents only.');
+        console.log('Non-agent role detected:', currentProfile.role);
+        navigate('/login', {
+          state: { message: 'Access denied: This page is for agents only. Please use the standard login.' },
+        });
       }
     } catch (err: any) {
-      setError(err.message || 'Login failed.');
+      console.error('Login Error:', err);
+      let errorMessage = err.message || 'Login failed. Please check your credentials and try again.';
+      if (err.message.includes('permission denied')) {
+        errorMessage = 'Permission denied: Unable to access profiles table. Check Supabase security rules for authenticated users.';
+      } else if (err.message.includes('no rows found') || err.code === 'PGRST116') {
+        errorMessage = 'No profile found for this user. Ensure the profile’s id matches the auth.users ID. Register at /agent-register.';
+      } else if (err.message.includes('column') || err.message.includes('does not exist')) {
+        errorMessage = 'Database schema error: The profiles table columns may be misconfigured. Verify the schema and query.';
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -71,16 +111,17 @@ export function AgentLogin() {
         redirectTo: 'http://localhost:3000/reset-password',
       });
 
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Failed to send password reset email.');
       setResetMessage('Password reset email sent! Check your inbox.');
     } catch (err: any) {
+      console.error('Forgot Password Error:', err);
       setError(err.message || 'Failed to send password reset email.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Show login form if not authenticated
+  // Show loading state while checking auth
   if (authLoading) {
     return (
       <div className="flex justify-center items-center min-h-[600px]">

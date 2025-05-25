@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import { Phone, Users, DoorClosed, Link as LinkIcon, CheckCircle, TrendingUp, Edit2, Search, Download, Mic, Building, Bell } from 'lucide-react';
 import * as tf from '@tensorflow/tfjs';
-import { Navigation } from './components/Navigation';
+import { Navigation } from '../components/Navigation';
 type ActivityType = 'phone_call' | 'client_meeting' | 'door_knock' | 'connection';
 
 interface Property {

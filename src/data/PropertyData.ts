@@ -12,22 +12,11 @@ export interface Property {
   price: number;
   created_at: string;
   user_id: string;
+  agent_id?: string; // Add optional agent_id
 }
 
 export interface StaticProperty extends Property {
-  id: string;
-  name: string;
-  address: string;
-  city: string;
-  country: string;
-  pincode: string;
-  survey_number: string;
-  phone: string;
-  email: string;
-  property_type: string;
-  price: number;
-  created_at: string;
-  user_id: string;
+  agent_id?: string; // Explicitly include to ensure consistency
 }
 
 export const staticProperties: StaticProperty[] = [
@@ -44,7 +33,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'villa',
     price: 2500000,
     created_at: '2024-01-15T10:30:00Z',
-    user_id: 'static-user-1'
+    user_id: 'static-user-1',
+    agent_id: 'agent-001', // Example agent_id
   },
   {
     id: 'static-2',
@@ -59,7 +49,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'apartment',
     price: 1800000,
     created_at: '2024-01-20T14:45:00Z',
-    user_id: 'static-user-2'
+    user_id: 'static-user-2',
+    agent_id: 'agent-002',
   },
   {
     id: 'static-3',
@@ -74,7 +65,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'penthouse',
     price: 3200000,
     created_at: '2024-01-25T09:15:00Z',
-    user_id: 'static-user-3'
+    user_id: 'static-user-3',
+    agent_id: 'agent-003',
   },
   {
     id: 'static-4',
@@ -89,7 +81,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'house',
     price: 950000,
     created_at: '2024-02-01T11:00:00Z',
-    user_id: 'static-user-4'
+    user_id: 'static-user-4',
+    agent_id: 'agent-004',
   },
   {
     id: 'static-5',
@@ -104,7 +97,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'estate',
     price: 4500000,
     created_at: '2024-02-05T16:30:00Z',
-    user_id: 'static-user-5'
+    user_id: 'static-user-5',
+    agent_id: 'agent-005',
   },
   {
     id: 'static-6',
@@ -119,7 +113,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'cabin',
     price: 1200000,
     created_at: '2024-02-10T13:45:00Z',
-    user_id: 'static-user-6'
+    user_id: 'static-user-6',
+    agent_id: 'agent-006',
   },
   {
     id: 'static-7',
@@ -134,7 +129,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'apartment',
     price: 15000000,
     created_at: '2024-01-15T10:30:00Z',
-    user_id: 'static-user-7'
+    user_id: 'static-user-7',
+    agent_id: 'agent-007',
   },
   {
     id: 'static-8',
@@ -149,7 +145,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'villa',
     price: 25000000,
     created_at: '2024-01-20T14:45:00Z',
-    user_id: 'static-user-8'
+    user_id: 'static-user-8',
+    agent_id: 'agent-008',
   },
   {
     id: 'static-9',
@@ -164,7 +161,8 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'flat',
     price: 12000000,
     created_at: '2024-01-25T09:15:00Z',
-    user_id: 'static-user-9'
+    user_id: 'static-user-9',
+    agent_id: 'agent-009',
   },
   {
     id: 'static-10',
@@ -179,8 +177,9 @@ export const staticProperties: StaticProperty[] = [
     property_type: 'house',
     price: 18000000,
     created_at: '2024-02-01T11:00:00Z',
-    user_id: 'static-user-10'
-  }
+    user_id: 'static-user-10',
+    agent_id: 'agent-010',
+  },
 ];
 
 export function combineProperties(supabaseProperties: Property[], staticProps: StaticProperty[]): (Property | StaticProperty)[] {
@@ -193,8 +192,10 @@ export function sortProperties(
   direction: 'asc' | 'desc'
 ): (Property | StaticProperty)[] {
   return [...properties].sort((a, b) => {
-    if (a[key] < b[key]) return direction === 'asc' ? -1 : 1;
-    if (a[key] > b[key]) return direction === 'asc' ? 1 : -1;
+    const aValue = key === 'agent_id' ? (a.agent_id || '') : a[key];
+    const bValue = key === 'agent_id' ? (b.agent_id || '') : b[key];
+    if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+    if (aValue > bValue) return direction === 'asc' ? 1 : -1;
     return 0;
   });
 }

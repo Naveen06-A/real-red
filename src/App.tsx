@@ -22,6 +22,9 @@ import { ProgressReportPage } from './pages/ProgressReportPage';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { CommissionByAgency } from './pages/CommissionByAgency';
 import { ComparisonReport } from './pages/Comparisons';
+import { CreateAdmin } from './pages/CreateAdmin';
+// import { AgentManagement } from './pages/AgentManagement';
+import { AdminLogin } from './pages/AdminLogin'; // Added import for AdminLogin
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
@@ -47,14 +50,25 @@ function AgentRoute({ children }: { children: React.ReactNode }) {
   return profile?.role === 'agent' || profile?.role === 'admin' ? <>{children}</> : <Navigate to="/agent-login" />;
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { profile, loading } = useAuthStore();
+
+  console.log('AdminRoute - loading:', loading, 'profile:', profile);
+
+  if (loading) {
+    return <LoadingOverlay message="Verifying admin..." />;
+  }
+
+  return profile?.role === 'admin' ? <>{children}</> : <Navigate to="/login" />;
+}
+
 function RouteChangeTracker() {
   const location = useLocation();
   const [isRouteLoading, setIsRouteLoading] = useState(false);
 
   useEffect(() => {
-    // Simulate loading on route change
     setIsRouteLoading(true);
-    const timer = setTimeout(() => setIsRouteLoading(false), 1000); // Adjust duration as needed
+    const timer = setTimeout(() => setIsRouteLoading(false), 1000);
     return () => clearTimeout(timer);
   }, [location.pathname]);
 
@@ -96,11 +110,28 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/agent-login" element={<AgentLogin />} />
+            <Route path="/login" element={<AdminLogin />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/agent-register" element={<AgentRegister />} />
             <Route path="/progress-report" element={<ProgressReportPage />} />
             <Route path="/comparisons" element={<ComparisonReport />} />
-            <Route path="/admin" element={<AdminDashboard />} />
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <AdminDashboard />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/create-admin"
+              element={
+                <AdminRoute>
+                  <CreateAdmin />
+                </AdminRoute>
+              }
+            />
+          
             <Route
               path="/agent-dashboard"
               element={
@@ -183,6 +214,7 @@ function App() {
                 </AgentRoute>
               }
             />
+            <Route path="/unauthorized" element={<div className="text-center p-8">Unauthorized Access</div>} />
           </Routes>
         </main>
       </div>

@@ -7,11 +7,18 @@ interface User {
   agent_name?: string;
   agency_name?: string;
 }
+
 interface UserProfile {
-  name: string;
-  phone: string;
+  id: string;
   email: string;
   role: 'user' | 'agent' | 'admin';
+  permissions: {
+    canRegisterProperties: boolean;
+    canEditProperties: boolean;
+    canDeleteProperties: boolean;
+  };
+  name?: string;
+  phone?: string;
 }
 
 interface AuthState {
@@ -66,24 +73,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
     try {
-      console.log('Fetching profile for user:', user.id);
+      console.log('Fetching profile for user ID:', user.id);
       const { data, error } = await supabase
         .from('profiles')
-        .select('name, phone, email, role')
+        .select('id, email, role, permissions, name, phone')
         .eq('id', user.id)
         .single();
+      console.log('Profile query result:', { data, error });
       if (error) {
         if (error.code === 'PGRST116') {
           console.log('No profile found, creating one...');
-          // Note: Defaulting to 'agent' role; consider dynamic role assignment (e.g., via registration)
           const { data: newProfile, error: insertError } = await supabase
             .from('profiles')
             .insert({
               id: user.id,
-              name: user.email?.split('@')[0] || 'Unknown',
-              phone: '',
               email: user.email || '',
               role: 'agent',
+              permissions: {
+                canRegisterProperties: false,
+                canEditProperties: false,
+                canDeleteProperties: false,
+              },
+              name: user.email?.split('@')[0] || 'Unknown',
+              phone: '',
             })
             .select()
             .single();

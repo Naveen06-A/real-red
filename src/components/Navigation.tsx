@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { LogOut, User, Building, BarChart3 } from 'lucide-react';
+import { LogOut, User, Building, BarChart3, Users, LogIn } from 'lucide-react';
 import { Logo } from './Logo';
 
 export function Navigation() {
@@ -47,15 +47,21 @@ export function Navigation() {
                 )}
 
                 {profile?.role === 'admin' && (
-                  <Link to="/admin" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
-                    <User className="w-5 h-5" />
-                    <span>Admin Dashboard</span>
-                  </Link>
+                  <>
+                    <Link to="/admin" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
+                      <User className="w-5 h-5" />
+                      <span>Admin Dashboard</span>
+                    </Link>
+                    <Link to="/agent-management" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
+                      <Users className="w-5 h-5" />
+                      <span>User Management</span>
+                    </Link>
+                  </>
                 )}
 
                 <div className="flex items-center space-x-2">
                   <User className="w-5 h-5 text-gray-600" />
-                  <span className="text-gray-600">{user.email}</span>
+                  <span className="text-gray-600">{user.email || 'User'}</span>
                 </div>
                 <button
                   onClick={handleSignOut}
@@ -67,14 +73,20 @@ export function Navigation() {
               </>
             ) : (
               <>
-                <Link to="/agent-login" className="text-gray-600 hover:text-blue-600">
-                  Login
+                <Link to="/agent-login" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
+                  <LogIn className="w-5 h-5" />
+                  <span>Agent Login</span>
+                </Link>
+                <Link to="/login" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
+                  <LogIn className="w-5 h-5" />
+                  <span>Admin Login</span>
                 </Link>
                 <Link
                   to="/agent-register"
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center space-x-1"
                 >
-                  Register
+                  <User className="w-5 h-5" />
+                  <span>Register</span>
                 </Link>
               </>
             )}

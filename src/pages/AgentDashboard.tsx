@@ -25,7 +25,7 @@ import {
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 interface PredictionResult {
-  recommendation: 'BUY' | 'SELL';
+  recommendation: 'BUY' | 'SELL'; // Fixed from 'ILON' to 'BUY'
   confidence: number;
   trend: number;
   historicalData: { dates: string[]; prices: number[] };
@@ -40,6 +40,19 @@ interface SuburbProgress {
   soldProperties: number;
   avgDaysOnMarket: number;
   conversionRate: number;
+}
+
+interface Filters {
+  bedrooms: string;
+  bathrooms: string;
+  car_garage: string;
+  square_feet: string;
+  price: string;
+  suburbs: string[];
+  propertyTypes: string[];
+  street_name: string;
+  category: string;
+  [key: string]: string | string[]; // Index signature for dynamic key access
 }
 
 const ALLOWED_SUBURBS = [
@@ -70,17 +83,7 @@ export function AgentDashboard() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suburbProgress, setSuburbProgress] = useState<SuburbProgress[]>([]);
   const [selectedSuburb, setSelectedSuburb] = useState<string | null>(null);
-  const [filters, setFilters] = useState<{
-    bedrooms: string;
-    bathrooms: string;
-    car_garage: string;
-    square_feet: string;
-    price: string;
-    suburbs: string[];
-    propertyTypes: string[];
-    street_name: string;
-    category: string;
-  }>({
+  const [filters, setFilters] = useState<Filters>({
     bedrooms: '',
     bathrooms: '',
     car_garage: '',
@@ -96,7 +99,7 @@ export function AgentDashboard() {
     if (profile?.role === 'agent') {
       fetchPropertiesAndPredict();
       fetchSuburbProgress();
-    } else if (profile && profile.role !== 'agent') {
+    } else if (profile) {
       navigate('/agent-login');
     }
   }, [profile, navigate]);
@@ -124,8 +127,7 @@ export function AgentDashboard() {
       const predictionPromises = fetchedProperties.map(async (property) => {
         const prediction = await analyzePriceTrend(
           property.city || property.suburb || 'Unknown',
-          property.property_type || 'Unknown',
-          property.price || 0
+          property.property_type || 'Unknown'
         );
         return { id: property.id, prediction };
       });
@@ -214,7 +216,7 @@ export function AgentDashboard() {
     recognition.start();
   };
 
-  const analyzePriceTrend = async (city: string, propertyType: string, currentPrice: number): Promise<PredictionResult> => {
+  const analyzePriceTrend = async (city: string, propertyType: string): Promise<PredictionResult> => {
     try {
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -228,7 +230,14 @@ export function AgentDashboard() {
       if (error) throw error;
 
       if (!historicalData || historicalData.length === 0) {
-        return { recommendation: 'BUY', confidence: 50, trend: 0, historicalData: { dates: [], prices: [] }, sentimentScore: 0 };
+        return {
+          recommendation: 'BUY',
+          confidence: 50,
+          trend: 0,
+          historicalData: { dates: [], prices: [] },
+          sentimentScore: 0,
+          marketCondition: 'Stable',
+        };
       }
 
       const dates = historicalData.map((record) => new Date(record.sale_date).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' }));
@@ -244,10 +253,18 @@ export function AgentDashboard() {
         trend: slope,
         historicalData: { dates, prices },
         sentimentScore: Math.random() * 100 - 50,
+        marketCondition,
       };
     } catch (error) {
       console.error('Price trend analysis failed:', error);
-      return { recommendation: 'BUY', confidence: 50, trend: 0, historicalData: { dates: [], prices: [] }, sentimentScore: 0 };
+      return {
+        recommendation: 'BUY',
+        confidence: 50,
+        trend: 0,
+        historicalData: { dates: [], prices: [] },
+        sentimentScore: 0,
+        marketCondition: 'Stable',
+      };
     }
   };
 
@@ -338,8 +355,7 @@ export function AgentDashboard() {
       const predictionPromises = (data || []).map(async (property) => {
         const prediction = await analyzePriceTrend(
           property.city || property.suburb || 'Unknown',
-          property.property_type || 'Unknown',
-          property.price || 0
+          property.property_type || 'Unknown'
         );
         return { id: property.id, prediction };
       });
@@ -571,7 +587,10 @@ export function AgentDashboard() {
         ticks: {
           color: '#1F2937',
           stepSize: 20,
-          callback: (value: number) => `${value}%`,
+          callback: (tickValue: string | number) => {
+            const value = typeof tickValue === 'string' ? parseFloat(tickValue) : tickValue;
+            return Number.isFinite(value) ? `${value}%` : '';
+          },
         },
         grid: {
           color: 'rgba(0, 0, 0, 0.1)',
@@ -1051,7 +1070,7 @@ export function AgentDashboard() {
                 <div className="flex justify-between items-center mb-2">
                   <h3 className="text-xl font-semibold truncate">
                     {property.street_number && property.street_name
-                      ? `${property.street_number} ${property.street_name}` // Fixed: Replaced p.street_name with property.street_name
+                      ? `${property.street_number} ${property.street_name}`
                       : property.address || 'Unknown Address'}
                   </h3>
                   <div className="relative group/badge">
