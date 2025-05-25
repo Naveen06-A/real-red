@@ -103,8 +103,8 @@ export function PropertyForm() {
   const [formData, setFormData] = useState<PropertyData>({
     street_number: '',
     street_name: '',
-    bedrooms: '1',
-    bathrooms: '1',
+    bedrooms: '0',
+    bathrooms: '0',
     car_garage: '0',
     sqm: '',
     landsize: '',
@@ -657,8 +657,8 @@ export function PropertyForm() {
       const propertyData: any = {
         street_number: formData.street_number,
         street_name: formData.street_name,
-        bedrooms: parseInt(formData.bedrooms) || 1,
-        bathrooms: parseInt(formData.bathrooms) || 1,
+        bedrooms: parseInt(formData.bedrooms) || 0,
+        bathrooms: parseInt(formData.bathrooms) || 0,
         car_garage: parseInt(formData.car_garage) || 0,
         sqm: parseFloat(formData.sqm.replace(/,/g, '')) || 0,
         landsize: parseFloat(formData.landsize.replace(/,/g, '')) || 0,
@@ -1501,6 +1501,7 @@ export function PropertyForm() {
                 onChange={handleChange}
                 className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
               >
+                <option value="0">0</option>
                 {[...Array(10)].map((_, i) => (
                   <option key={i + 1} value={i + 1}>
                     {i + 1}
@@ -1520,6 +1521,7 @@ export function PropertyForm() {
                 onChange={handleChange}
                 className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
               >
+                <option value="0">0</option>
                 {[...Array(10)].map((_, i) => (
                   <option key={i + 1} value={i + 1}>
                     {i + 1}
@@ -1539,6 +1541,7 @@ export function PropertyForm() {
                 onChange={handleChange}
                 className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
               >
+                <option value="0">0</option>
                 {[...Array(10)].map((_, i) => (
                   <option key={i + 1} value={i + 1}>
                     {i + 1}

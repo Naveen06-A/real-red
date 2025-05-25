@@ -4,6 +4,7 @@ import { Loader2, Plus, Trash2, Phone, DoorClosed, CheckCircle, Eye } from 'luci
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { StreetSuggestions } from './StreetSuggestions';
 
 // Custom UUID function
 const uuidv4 = () => {
@@ -23,20 +24,18 @@ const toTitleCase = (str: string) => {
     .join(' ');
 };
 
-// Predefined suburbs
 const PREDEFINED_SUBURBS = [
-  'Moggill  QLD 4070',
+  'Moggill QLD 4070',
   'Bellbowrie QLD 4070',
-  'Pullenvale 4069',
-  'Brookfield 4069',
-  'Anstead 4070',
-  'Chapel Hill 4069',
-  'Kenmore 4069',
-  'Kenmore Hills 4069',
-  'Fig Tree Pocket 4069',
-  'Pinjara Hills 4069',
+  'Pullenvale QLD 4069',
+  'Brookfield QLD 4069',
+  'Anstead QLD 4070',
+  'Chapel Hill QLD 4069',
+  'Kenmore QLD 4069',
+  'Kenmore Hills QLD 4069',
+  'Fig Tree Pocket QLD 4069',
+  'Pinjara Hills QLD 4069',
 ];
-
 interface DoorKnockStreet {
   id: string;
   name: string;
@@ -176,11 +175,9 @@ export function MarketingPlanPage() {
 
   useEffect(() => {
     if (saveSuccess) {
-      console.log('saveSuccess is true, showing notification');
       const timer = setTimeout(() => {
-        console.log('Hiding notification');
         setSaveSuccess(false);
-      }, 5000); // Increased to 5 seconds for visibility
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [saveSuccess]);
@@ -397,23 +394,43 @@ export function MarketingPlanPage() {
     if (!marketingPlan.suburb) newErrors.suburb = 'Please select or enter a suburb';
     if (!marketingPlan.start_date) newErrors.start_date = 'Please select a start date';
     if (!marketingPlan.end_date) newErrors.end_date = 'Please select an end date';
+    if (
+      marketingPlan.start_date &&
+      marketingPlan.end_date &&
+      new Date(marketingPlan.end_date) <= new Date(marketingPlan.start_date)
+    ) {
+      newErrors.end_date = 'End date must be after start date';
+    }
     marketingPlan.door_knock_streets.forEach((street, index) => {
-      if (!street.name) newErrors[`door_knock_street_${index}_name`] = `Please enter a street name for door knock ${index + 1}`;
+      if (!street.name)
+        newErrors[`door_knock_street_${index}_name`] = `Please enter a street name for door knock ${index + 1}`;
       if (!street.target_knocks || parseInt(street.target_knocks) <= 0)
-        newErrors[`door_knock_street_${index}_target_knocks`] = `Please enter a valid number of target knocks for door knock ${index + 1}`;
+        newErrors[`door_knock_street_${index}_target_knocks`] = `Please enter a valid number of target knocks for door knock ${
+          index + 1
+        }`;
       if (!street.target_made || parseInt(street.target_made) <= 0)
-        newErrors[`door_knock_street_${index}_target_made`] = `Please enter a valid number of target knocks made for door knock ${index + 1}`;
+        newErrors[`door_knock_street_${index}_target_made`] = `Please enter a valid number of target knocks made for door knock ${
+          index + 1
+        }`;
       if (!street.target_answers || parseInt(street.target_answers) <= 0)
-        newErrors[`door_knock_street_${index}_target_answers`] = `Please enter a valid number of target answers for door knock ${index + 1}`;
+        newErrors[`door_knock_street_${index}_target_answers`] = `Please enter a valid number of target answers for door knock ${
+          index + 1
+        }`;
       if (!street.target_connects || parseInt(street.target_connects) <= 0)
-        newErrors[`door_knock_street_${index}_target_connects`] = `Please enter a valid number of target connects for door knock ${index + 1}`;
+        newErrors[`door_knock_street_${index}_target_connects`] = `Please enter a valid number of target connects for door knock ${
+          index + 1
+        }`;
     });
     marketingPlan.phone_call_streets.forEach((street, index) => {
       if (!street.name) newErrors[`phone_call_street_${index}_name`] = `Please enter a street name for phone call ${index + 1}`;
       if (!street.target_calls || parseInt(street.target_calls) <= 0)
-        newErrors[`phone_call_street_${index}_target_calls`] = `Please enter a valid number of target calls for phone call ${index + 1}`;
+        newErrors[`phone_call_street_${index}_target_calls`] = `Please enter a valid number of target calls for phone call ${
+          index + 1
+        }`;
       if (!street.target_connects || parseInt(street.target_connects) <= 0)
-        newErrors[`phone_call_street_${index}_target_connects`] = `Please enter a valid number of target connects for phone call ${index + 1}`;
+        newErrors[`phone_call_street_${index}_target_connects`] = `Please enter a valid number of target connects for phone call ${
+          index + 1
+        }`;
     });
 
     setErrors(newErrors);
@@ -423,16 +440,14 @@ export function MarketingPlanPage() {
   const saveMarketingPlan = async () => {
     setIsSaving(true);
     setSaveError(null);
-    setSaveSuccess(false); // Reset saveSuccess to ensure fresh trigger
+    setSaveSuccess(false);
     if (!validatePlan()) {
-      console.error('Validation failed with errors:', errors);
       setSaveError('Please fix the errors in the form before saving.');
       setIsSaving(false);
       return;
     }
 
     if (!user?.id) {
-      console.error('No user ID found. User is not logged in.');
       setSaveError('Please log in to save the marketing plan.');
       setIsSaving(false);
       return;
@@ -469,8 +484,6 @@ export function MarketingPlanPage() {
         updated_at: new Date().toISOString(),
       };
 
-      console.log('Attempting to save marketing plan:', formattedPlan);
-
       const { data: existingPlan, error: selectError } = await supabase
         .from('marketing_plans')
         .select('id')
@@ -478,40 +491,30 @@ export function MarketingPlanPage() {
         .single();
 
       if (selectError && selectError.code !== 'PGRST116') {
-        console.error('Error checking existing plan:', selectError);
         throw new Error(`Failed to check existing plan: ${selectError.message}`);
       }
 
       if (existingPlan) {
-        console.log('Updating existing plan with ID:', marketingPlan.id);
         const { error: updateError } = await supabase
           .from('marketing_plans')
           .update(formattedPlan)
           .eq('id', marketingPlan.id);
 
         if (updateError) {
-          console.error('Error updating marketing plan:', updateError);
           throw new Error(`Failed to update marketing plan: ${updateError.message}`);
         }
       } else {
-        console.log('Inserting new marketing plan with ID:', marketingPlan.id);
-        const { error: insertError } = await supabase
-          .from('marketing_plans')
-          .insert(formattedPlan);
+        const { error: insertError } = await supabase.from('marketing_plans').insert(formattedPlan);
 
         if (insertError) {
-          console.error('Error inserting marketing plan:', insertError);
           throw new Error(`Failed to insert marketing plan: ${insertError.message}`);
         }
       }
 
-      console.log('Marketing plan saved successfully');
       await loadMarketingPlan(user.id);
       await loadSavedPlans(user.id);
-      setSaveSuccess(true); // Trigger success notification
-      console.log('setSaveSuccess(true) called');
+      setSaveSuccess(true);
     } catch (error: any) {
-      console.error('Error saving marketing plan:', error);
       setSaveError(`Failed to save marketing plan: ${error.message || 'Please try again.'}`);
     } finally {
       setIsSaving(false);
@@ -586,6 +589,49 @@ export function MarketingPlanPage() {
       });
     }
   };
+
+    const handleSelectStreet = (
+    street: { name: string; why: string },
+    type: 'door_knock' | 'phone_call' = 'door_knock' // Default to door_knock
+  ) => {
+    if (type === 'door_knock') {
+      setMarketingPlan({
+        ...marketingPlan,
+        door_knock_streets: [
+          ...marketingPlan.door_knock_streets,
+          {
+            id: uuidv4(),
+            name: street.name,
+            why: street.why,
+            house_count: '',
+            target_knocks: '50',
+            target_made: '50',
+            target_answers: '20',
+            target_connects: '10',
+            desktop_appraisals: '5',
+            face_to_face_appraisals: '2',
+          },
+        ],
+      });
+    } else {
+      setMarketingPlan({
+        ...marketingPlan,
+        phone_call_streets: [
+          ...marketingPlan.phone_call_streets,
+          {
+            id: uuidv4(),
+            name: street.name,
+            why: street.why,
+            target_calls: '30',
+            target_connects: '10',
+            desktop_appraisals: '3',
+            face_to_face_appraisals: '1',
+          },
+        ],
+      });
+    }
+    setSelectedActivity(type);
+  };;
 
   const removeStreet = (type: 'door_knock' | 'phone_call', id: string) => {
     if (type === 'door_knock') {
@@ -851,9 +897,7 @@ export function MarketingPlanPage() {
           transition={{ duration: 0.5, delay: 0.4 }}
         >
           {saveSuccess && (
-            <div
-              className="fixed top-4 right-4 flex items-center bg-green-100 text-green-800 px-4 py-2 rounded-lg shadow z-[1000]"
-            >
+            <div className="fixed top-4 right-4 flex items-center bg-green-100 text-green-800 px-4 py-2 rounded-lg shadow z-[1000]">
               <CheckCircle className="w-5 h-5 mr-2" />
               <div className="flex flex-col">
                 <span>Successfully created marketing plan</span>
@@ -917,7 +961,9 @@ export function MarketingPlanPage() {
                 <motion.input
                   type="text"
                   value={marketingPlan.suburb}
-                  onChange={(e) => setMarketingPlan({ ...marketingPlan, suburb: toTitleCase(e.target.value) })}
+                  onChange={(e) =>
+                    setMarketingPlan({ ...marketingPlan, suburb: toTitleCase(e.target.value) })
+                  }
                   className="w-full p-3 mt-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                   placeholder="Enter custom suburb"
                   aria-label="Enter custom suburb"
@@ -930,6 +976,14 @@ export function MarketingPlanPage() {
                 <p className="text-red-600 text-sm mt-1 font-medium">{errors.suburb}</p>
               )}
             </div>
+
+            <StreetSuggestions
+              suburb={marketingPlan.suburb || null}
+              onSelectStreet={(street) => {
+                setMarketingPlan((prev) =>({ ...prev, suburb: street.name}));
+              }}
+  
+            />
 
             <motion.div
               className="bg-gray-50 p-6 rounded-lg shadow-sm"
@@ -956,15 +1010,19 @@ export function MarketingPlanPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knocks</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.doorKnocks.completed} aria-valuemin={0} aria-valuemax={actualProgress.doorKnocks.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.doorKnocks.completed / (actualProgress.doorKnocks.target || 1)) * 100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.doorKnocks.target
+                              ? Math.min(
+                                  (actualProgress.doorKnocks.completed / actualProgress.doorKnocks.target) * 100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -973,24 +1031,27 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.doorKnocks.completed / (actualProgress.doorKnocks.target || 1)) * 100
-                    )}
+                    {actualProgress.doorKnocks.target
+                      ? Math.round((actualProgress.doorKnocks.completed / actualProgress.doorKnocks.target) * 100)
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knocks Made</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.doorKnocksMade.completed} aria-valuemin={0} aria-valuemax={actualProgress.doorKnocksMade.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.doorKnocksMade.completed / (actualProgress.doorKnocksMade.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.doorKnocksMade.target
+                              ? Math.min(
+                                  (actualProgress.doorKnocksMade.completed / actualProgress.doorKnocksMade.target) * 100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -999,24 +1060,28 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.doorKnocksMade.completed / (actualProgress.doorKnocksMade.target || 1)) * 100
-                    )}
+                    {actualProgress.doorKnocksMade.target
+                      ? Math.round((actualProgress.doorKnocksMade.completed / actualProgress.doorKnocksMade.target) * 100)
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knock Answers</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.doorKnockAnswers.completed} aria-valuemin={0} aria-valuemax={actualProgress.doorKnockAnswers.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.doorKnockAnswers.completed / (actualProgress.doorKnockAnswers.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.doorKnockAnswers.target
+                              ? Math.min(
+                                  (actualProgress.doorKnockAnswers.completed / actualProgress.doorKnockAnswers.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1025,25 +1090,30 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.doorKnockAnswers.completed / (actualProgress.doorKnockAnswers.target || 1)) * 100
-                    )}
+                    {actualProgress.doorKnockAnswers.target
+                      ? Math.round(
+                          (actualProgress.doorKnockAnswers.completed / actualProgress.doorKnockAnswers.target) * 100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knock Connects</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.doorKnockConnects.completed} aria-valuemin={0} aria-valuemax={actualProgress.doorKnockConnects.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.doorKnockConnects.completed /
-                              (actualProgress.doorKnockConnects.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.doorKnockConnects.target
+                              ? Math.min(
+                                  (actualProgress.doorKnockConnects.completed / actualProgress.doorKnockConnects.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1052,25 +1122,31 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.doorKnockConnects.completed / (actualProgress.doorKnockConnects.target || 1)) * 100
-                    )}
+                    {actualProgress.doorKnockConnects.target
+                      ? Math.round(
+                          (actualProgress.doorKnockConnects.completed / actualProgress.doorKnockConnects.target) * 100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knock Desktop Appraisals</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.doorKnockDesktopAppraisals.completed} aria-valuemin={0} aria-valuemax={actualProgress.doorKnockDesktopAppraisals.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.doorKnockDesktopAppraisals.completed /
-                              (actualProgress.doorKnockDesktopAppraisals.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.doorKnockDesktopAppraisals.target
+                              ? Math.min(
+                                  (actualProgress.doorKnockDesktopAppraisals.completed /
+                                    actualProgress.doorKnockDesktopAppraisals.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1080,27 +1156,33 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.doorKnockDesktopAppraisals.completed /
-                        (actualProgress.doorKnockDesktopAppraisals.target || 1)) *
-                        100
-                    )}
+                    {actualProgress.doorKnockDesktopAppraisals.target
+                      ? Math.round(
+                          (actualProgress.doorKnockDesktopAppraisals.completed /
+                            actualProgress.doorKnockDesktopAppraisals.target) *
+                            100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Door Knock Face-to-Face Appraisals</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.doorKnockFaceToFaceAppraisals.completed} aria-valuemin={0} aria-valuemax={actualProgress.doorKnockFaceToFaceAppraisals.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.doorKnockFaceToFaceAppraisals.completed /
-                              (actualProgress.doorKnockFaceToFaceAppraisals.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.doorKnockFaceToFaceAppraisals.target
+                              ? Math.min(
+                                  (actualProgress.doorKnockFaceToFaceAppraisals.completed /
+                                    actualProgress.doorKnockFaceToFaceAppraisals.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1110,25 +1192,31 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.doorKnockFaceToFaceAppraisals.completed /
-                        (actualProgress.doorKnockFaceToFaceAppraisals.target || 1)) *
-                        100
-                    )}
+                    {actualProgress.doorKnockFaceToFaceAppraisals.target
+                      ? Math.round(
+                          (actualProgress.doorKnockFaceToFaceAppraisals.completed /
+                            actualProgress.doorKnockFaceToFaceAppraisals.target) *
+                            100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Phone Calls</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.phoneCalls.completed} aria-valuemin={0} aria-valuemax={actualProgress.phoneCalls.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.phoneCalls.completed / (actualProgress.phoneCalls.target || 1)) * 100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.phoneCalls.target
+                              ? Math.min(
+                                  (actualProgress.phoneCalls.completed / actualProgress.phoneCalls.target) * 100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1137,25 +1225,29 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.phoneCalls.completed / (actualProgress.phoneCalls.target || 1)) * 100
-                    )}
+                    {actualProgress.phoneCalls.target
+                      ? Math.round((actualProgress.phoneCalls.completed / actualProgress.phoneCalls.target) * 100)
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Phone Call Connects</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.phoneCallConnects.completed} aria-valuemin={0} aria-valuemax={actualProgress.phoneCallConnects.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.phoneCallConnects.completed /
-                              (actualProgress.phoneCallConnects.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.phoneCallConnects.target
+                              ? Math.min(
+                                  (actualProgress.phoneCallConnects.completed /
+                                    actualProgress.phoneCallConnects.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1164,25 +1256,31 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.phoneCallConnects.completed / (actualProgress.phoneCallConnects.target || 1)) * 100
-                    )}
+                    {actualProgress.phoneCallConnects.target
+                      ? Math.round(
+                          (actualProgress.phoneCallConnects.completed / actualProgress.phoneCallConnects.target) * 100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Phone Call Desktop Appraisals</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.phoneCallDesktopAppraisals.completed} aria-valuemin={0} aria-valuemax={actualProgress.phoneCallDesktopAppraisals.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.phoneCallDesktopAppraisals.completed /
-                              (actualProgress.phoneCallDesktopAppraisals.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.phoneCallDesktopAppraisals.target
+                              ? Math.min(
+                                  (actualProgress.phoneCallDesktopAppraisals.completed /
+                                    actualProgress.phoneCallDesktopAppraisals.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1192,27 +1290,33 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.phoneCallDesktopAppraisals.completed /
-                        (actualProgress.phoneCallDesktopAppraisals.target || 1)) *
-                        100
-                    )}
+                    {actualProgress.phoneCallDesktopAppraisals.target
+                      ? Math.round(
+                          (actualProgress.phoneCallDesktopAppraisals.completed /
+                            actualProgress.phoneCallDesktopAppraisals.target) *
+                            100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
                 <div className="relative group">
                   <p className="font-semibold text-gray-800 mb-2">Phone Call Face-to-Face Appraisals</p>
-                  <div className="flex items-center">
+                  <div className="flex items-center" role="progressbar" aria-valuenow={actualProgress.phoneCallFaceToFaceAppraisals.completed} aria-valuemin={0} aria-valuemax={actualProgress.phoneCallFaceToFaceAppraisals.target}>
                     <div className="flex-1 bg-gray-200 rounded-full h-3 mr-2 overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full transition-all duration-1000 ease-out"
                         style={{
-                          width: `${Math.min(
-                            (actualProgress.phoneCallFaceToFaceAppraisals.completed /
-                              (actualProgress.phoneCallFaceToFaceAppraisals.target || 1)) *
-                              100,
-                            100
-                          )}%`,
+                          width: `${
+                            actualProgress.phoneCallFaceToFaceAppraisals.target
+                              ? Math.min(
+                                  (actualProgress.phoneCallFaceToFaceAppraisals.completed /
+                                    actualProgress.phoneCallFaceToFaceAppraisals.target) *
+                                    100,
+                                  100
+                                )
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
@@ -1222,11 +1326,13 @@ export function MarketingPlanPage() {
                     </span>
                   </div>
                   <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                    {Math.round(
-                      (actualProgress.phoneCallFaceToFaceAppraisals.completed /
-                        (actualProgress.phoneCallFaceToFaceAppraisals.target || 1)) *
-                        100
-                    )}
+                    {actualProgress.phoneCallFaceToFaceAppraisals.target
+                      ? Math.round(
+                          (actualProgress.phoneCallFaceToFaceAppraisals.completed /
+                            actualProgress.phoneCallFaceToFaceAppraisals.target) *
+                            100
+                        )
+                      : 0}
                     % Complete
                   </div>
                 </div>
