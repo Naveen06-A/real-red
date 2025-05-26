@@ -1,3 +1,4 @@
+
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -89,6 +90,11 @@ interface ComparisonMetrics {
     topListings: number;
     harcourtsListings: number;
   }[];
+  streetComparison: {
+    street: string;
+    listedCount: number;
+    soldCount: number;
+  };
 }
 
 interface AgencyCardProps {
@@ -98,6 +104,7 @@ interface AgencyCardProps {
   maxSold: number;
   isOurAgency: boolean;
   comparisonMetrics: ComparisonMetrics | null;
+  ourAgentName: string;
 }
 
 // Theme Toggle Component
@@ -169,7 +176,7 @@ const CollapsibleSection: React.FC<{
 );
 
 // Agency Card Component
-const AgencyCard: React.FC<AgencyCardProps> = ({ item, index, globalIndex, maxSold, isOurAgency, comparisonMetrics }) => {
+const AgencyCard: React.FC<AgencyCardProps> = ({ item, index, globalIndex, maxSold, isOurAgency, comparisonMetrics, ourAgentName }) => {
   const progress = maxSold > 0 ? (item.soldCount / maxSold) * 100 : 0;
   const rankPercentile = comparisonMetrics?.agencyComparison?.length
     ? Math.ceil((globalIndex + 1) / comparisonMetrics.agencyComparison.length * 100)
@@ -198,7 +205,15 @@ const AgencyCard: React.FC<AgencyCardProps> = ({ item, index, globalIndex, maxSo
         </motion.div>
       )}
       <h3 className="text-lg font-semibold">Rank {globalIndex + 1}: {item.agency}</h3>
-      <p className="text-sm mt-2">Agents: {item.agents.join(', ')}</p>
+      <p className="text-sm mt-2">
+        Agents: {item.agents.map((agent) => (
+          agent === ourAgentName && isOurAgency ? (
+            <span key={agent} className="font-semibold underline">{agent} (Our Agent)</span>
+          ) : (
+            agent
+          )
+        )).join(', ')}
+      </p>
       <p className="text-sm">Listed: {item.listedCount}</p>
       <p className="text-sm">Sold: {item.soldCount}</p>
       <div className="mt-4">
@@ -210,7 +225,7 @@ const AgencyCard: React.FC<AgencyCardProps> = ({ item, index, globalIndex, maxSo
 
 // Extend jsPDF with autoTable
 interface JsPDFWithAutoTable extends jsPDF {
-  autoTable: typeof autoTable;
+  autoTable: (content: { head: string[][]; body: string[][] }, options?: any) => void;
   lastAutoTable: { finalY: number };
 }
 
@@ -387,7 +402,7 @@ export function ComparisonReport() {
     if (DEBUG) console.log('useMemo: Computing metrics for', properties.length, 'properties');
 
     // 1. Harcourts Success Metrics
-    const harcourtsProperties = properties.filter((prop) => prop.agency_name === ourAgencyName);
+    const harcourtsProperties = properties.filter((prop: PropertyDetails) => prop.agency_name === ourAgencyName);
     const harcourtsAgents = [...new Set(harcourtsProperties.map((prop) => prop.agent_name || 'Unknown'))];
     const agentMetrics = harcourtsAgents.map((agent) => {
       const agentProps = harcourtsProperties.filter((prop) => prop.agent_name === agent);
@@ -411,7 +426,7 @@ export function ComparisonReport() {
 
     // 2. Agency Comparison (Sorted Highest to Lowest by Listed, then Sold)
     const agencyMap: { [agency: string]: { listed: number; sold: number; agents: Set<string> } } = {};
-    properties.forEach((prop) => {
+    properties.forEach((prop: PropertyDetails) => {
       const agency = prop.agency_name || 'Unknown';
       const agent = prop.agent_name || 'Unknown';
       if (!agencyMap[agency]) {
@@ -424,7 +439,7 @@ export function ComparisonReport() {
 
     const agencyComparison = Object.entries(agencyMap)
       .map(([agency, { listed, sold, agents }]) => ({
-        agency: agency.charAt(0).toUpperCase() + agency.slice(1), // Capitalize agency name
+        agency: agency.charAt(0).toUpperCase() + agency.slice(1),
         listedCount: listed,
         soldCount: sold,
         agents: Array.from(agents),
@@ -433,7 +448,7 @@ export function ComparisonReport() {
 
     // 3. Agent Comparison (Sorted Highest to Lowest by Listings, then Sales)
     const agentMap: { [key: string]: { listings: number; sales: number; agency: string } } = {};
-    properties.forEach((prop) => {
+    properties.forEach((prop: PropertyDetails) => {
       const agent = prop.agent_name || 'Unknown';
       const agency = prop.agency_name || 'Unknown';
       const key = `${agent}-${agency}`;
@@ -447,16 +462,16 @@ export function ComparisonReport() {
     const agentComparison = Object.entries(agentMap)
       .map(([key, { listings, sales, agency }]) => ({
         agent: key.split('-')[0],
-        agency: agency.charAt(0).toUpperCase() + agency.slice(1), // Capitalize agency name
+        agency: agency.charAt(0).toUpperCase() + agency.slice(1),
         listings,
         sales,
       }))
       .sort((a, b) => b.listings - a.listings || b.sales - a.sales)
-      .slice(0, 10); // Top 10 agents
+      .slice(0, 10);
 
     // 4. Suburb Comparison (Sorted Highest to Lowest by Top Listings)
     const suburbMap: { [suburb: string]: { agencies: { [agency: string]: number } } } = {};
-    properties.forEach((prop) => {
+    properties.forEach((prop: PropertyDetails) => {
       const suburb = normalizeSuburb(prop.suburb);
       const agency = prop.agency_name || 'Unknown';
       if (!suburbMap[suburb]) suburbMap[suburb] = { agencies: {} };
@@ -471,20 +486,41 @@ export function ComparisonReport() {
         );
         return {
           suburb,
-          topAgency: topAgencyEntry.agency.charAt(0).toUpperCase() + topAgencyEntry.agency.slice(1), // Capitalize agency name
+          topAgency: topAgencyEntry.agency.charAt(0).toUpperCase() + topAgencyEntry.agency.slice(1),
           topListings: topAgencyEntry.count,
           harcourtsListings: agencies[ourAgencyName] || 0,
         };
       })
       .sort((a, b) => b.topListings - a.topListings || a.suburb.localeCompare(b.suburb));
 
+    // 5. Street Comparison (Most Listed and Sold)
+    const streetMap: { [street: string]: { listed: number; sold: number } } = {};
+    properties.forEach((prop: PropertyDetails) => {
+      const street = `${prop.street_name}, ${normalizeSuburb(prop.suburb)}`;
+      if (!streetMap[street]) {
+        streetMap[street] = { listed: 0, sold: 0 };
+      }
+      streetMap[street].listed += 1;
+      if (prop.sold_date) streetMap[street].sold += 1;
+    });
+
+    const streetComparison = Object.entries(streetMap)
+      .map(([street, { listed, sold }]) => ({
+        street,
+        listedCount: listed,
+        soldCount: sold,
+      }))
+      .sort((a, b) => b.listedCount - a.listedCount || b.soldCount - a.soldCount)
+      .slice(0, 1)[0]; // Get the top street
+
     return {
       harcourtsSuccess,
       agencyComparison,
       agentComparison,
       suburbComparison,
+      streetComparison,
     };
-  }, [properties, user]);
+  }, [properties, user, ourAgencyName]);
 
   // Pagination for Agency Comparison
   const totalPages = comparisonMetrics ? Math.ceil(comparisonMetrics.agencyComparison.length / itemsPerPage) : 1;
@@ -559,7 +595,9 @@ export function ComparisonReport() {
         ['Total Sold', comparisonMetrics.harcourtsSuccess.totalSold.toString()],
         ['Agents', comparisonMetrics.harcourtsSuccess.agents.join(', ')],
         ['Top Agent', `${comparisonMetrics.harcourtsSuccess.topAgent.name} (${comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)`],
-      ],
+        ['Most Active Street', `${comparisonMetrics.streetComparison.street} (${comparisonMetrics.streetComparison.listedCount} listed, ${comparisonMetrics.streetComparison.soldCount} sold)`],
+      ]
+    }, {
       startY: 30,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
@@ -575,7 +613,8 @@ export function ComparisonReport() {
         item.agents.join(', '),
         item.listedCount.toString(),
         item.soldCount.toString(),
-      ]),
+      ])
+    }, {
       startY: doc.lastAutoTable.finalY + 10,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
@@ -592,7 +631,8 @@ export function ComparisonReport() {
         item.listings.toString(),
         item.sales.toString(),
         item.agent === ourAgentName && item.agency === ourAgencyName ? 'Yes' : 'No',
-      ]),
+      ])
+    }, {
       startY: doc.lastAutoTable.finalY + 10,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
@@ -608,7 +648,8 @@ export function ComparisonReport() {
         item.topAgency,
         item.topListings.toString(),
         item.harcourtsListings.toString(),
-      ]),
+      ])
+    }, {
       startY: doc.lastAutoTable.finalY + 10,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
@@ -626,6 +667,7 @@ export function ComparisonReport() {
       { Metric: 'Total Sold', Value: comparisonMetrics.harcourtsSuccess.totalSold },
       { Metric: 'Agents', Value: comparisonMetrics.harcourtsSuccess.agents.join(', ') },
       { Metric: 'Top Agent', Value: `${comparisonMetrics.harcourtsSuccess.topAgent.name} (${comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)` },
+      { Metric: 'Most Active Street', Value: `${comparisonMetrics.streetComparison.street} (${comparisonMetrics.streetComparison.listedCount} listed, ${comparisonMetrics.streetComparison.soldCount} sold)` },
       {},
       ...comparisonMetrics.agencyComparison.map((item, index) => ({
         Rank: index + 1,
@@ -738,7 +780,7 @@ export function ComparisonReport() {
                     toggleOpen={() => setOpenSections({ ...openSections, spotlight: !openSections.spotlight })}
                   >
                     <div className="p-6 bg-[#BFDBFE] rounded-md">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                         <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
                           <p className="text-sm text-[#1E3A8A]">Total Listings</p>
                           <p className="text-2xl font-semibold text-[#1E3A8A]">{comparisonMetrics.harcourtsSuccess.totalListings}</p>
@@ -755,6 +797,12 @@ export function ComparisonReport() {
                           <p className="text-sm text-[#1E3A8A]">Top Agent</p>
                           <p className="text-base font-semibold text-[#1E3A8A]">
                             {comparisonMetrics.harcourtsSuccess.topAgent.name} ({comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)
+                          </p>
+                        </div>
+                        <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
+                          <p className="text-sm text-[#1E3A8A]">Most Active Street</p>
+                          <p className="text-base font-semibold text-[#1E3A8A]">
+                            {comparisonMetrics.streetComparison.street} ({comparisonMetrics.streetComparison.listedCount} listed)
                           </p>
                         </div>
                       </div>
@@ -804,6 +852,7 @@ export function ComparisonReport() {
                               maxSold={Math.max(...comparisonMetrics.agencyComparison.map((i) => i.soldCount))}
                               isOurAgency={item.agency === ourAgencyName}
                               comparisonMetrics={comparisonMetrics}
+                              ourAgentName={ourAgentName}
                             />
                           ))}
                         </motion.div>

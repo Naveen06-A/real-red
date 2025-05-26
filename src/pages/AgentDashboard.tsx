@@ -25,7 +25,7 @@ import {
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 interface PredictionResult {
-  recommendation: 'BUY' | 'SELL'; // Fixed from 'ILON' to 'BUY'
+  recommendation: 'BUY' | 'SELL';
   confidence: number;
   trend: number;
   historicalData: { dates: string[]; prices: number[] };
@@ -52,7 +52,7 @@ interface Filters {
   propertyTypes: string[];
   street_name: string;
   category: string;
-  [key: string]: string | string[]; // Index signature for dynamic key access
+  [key: string]: string | string[];
 }
 
 const ALLOWED_SUBURBS = [
@@ -105,9 +105,9 @@ export function AgentDashboard() {
   }, [profile, navigate]);
 
   useEffect(() => {
-    console.log('Filters changed:', filters);
+    console.log('Filters changed:', { filters, searchQuery });
     applyFiltersAndSearch();
-  }, [filters]);
+  }, [filters, searchQuery]); // Added searchQuery to dependencies
 
   const fetchPropertiesAndPredict = async () => {
     setLoading(true);
@@ -323,19 +323,22 @@ export function AgentDashboard() {
       console.log('Applying filters:', { filters, query });
       let queryBuilder = supabase.from('properties').select('*');
 
-      if (filters.category) {
+      // Apply category filter only if explicitly set
+      if (filters.category && filters.category !== '') {
         console.log('Filtering by category (eq):', filters.category);
         queryBuilder = queryBuilder.eq('category', filters.category);
       } else {
         console.log('No category filter applied, fetching all properties');
       }
 
+      // Apply search query if present
       if (query) {
         queryBuilder = queryBuilder.or(
           `property_type.ilike.%${query}%,street_name.ilike.%${query}%,address.ilike.%${query}%`
         );
       }
 
+      // Apply other filters
       if (filters.bedrooms) queryBuilder = queryBuilder.gte('bedrooms', parseInt(filters.bedrooms) || 0);
       if (filters.bathrooms) queryBuilder = queryBuilder.gte('bathrooms', parseInt(filters.bathrooms) || 0);
       if (filters.car_garage) queryBuilder = queryBuilder.gte('car_garage', parseInt(filters.car_garage) || 0);
@@ -352,6 +355,7 @@ export function AgentDashboard() {
       setProperties(data || []);
       setError(data?.length === 0 ? 'No properties match the applied filters.' : null);
 
+      // Fetch predictions for filtered properties
       const predictionPromises = (data || []).map(async (property) => {
         const prediction = await analyzePriceTrend(
           property.city || property.suburb || 'Unknown',
@@ -386,7 +390,7 @@ export function AgentDashboard() {
     if (filters.suburbs.length > 0) count++;
     if (filters.propertyTypes.length > 0) count++;
     if (filters.street_name) count++;
-    if (filters.category) count++;
+    if (filters.category && filters.category !== '') count++; // Only count non-empty category
     return count;
   };
 
@@ -404,14 +408,16 @@ export function AgentDashboard() {
       street_name: '',
       category: '',
     });
+    // Explicitly trigger a fetch with no filters
+    applyFiltersAndSearch('');
   };
 
   const handleCategoryClick = (category: string) => {
-    const newCategory = filters.category === category ? '' : category;
-    setFilters((prev) => {
-      console.log('Setting category filter to:', newCategory);
-      return { ...prev, category: newCategory };
-    });
+    console.log('Category clicked:', category);
+    setFilters((prev) => ({
+      ...prev,
+      category: prev.category === category ? '' : category,
+    }));
   };
 
   const generateReport = () => {
@@ -426,7 +432,7 @@ export function AgentDashboard() {
     doc.setFontSize(10);
     let yPos = 50;
     const activeFilters = Object.entries(filters).filter(([_, value]) =>
-      (typeof value === 'string' && value) || (Array.isArray(value) && value.length > 0)
+      (typeof value === 'string' && value && value !== '') || (Array.isArray(value) && value.length > 0)
     );
     if (searchQuery) activeFilters.unshift(['Search', searchQuery]);
     if (activeFilters.length === 0) {
@@ -818,7 +824,7 @@ export function AgentDashboard() {
               </span>
             )}
             {Object.entries(filters).map(([key, value]) => {
-              if ((typeof value === 'string' && value) || (Array.isArray(value) && value.length > 0)) {
+              if ((typeof value === 'string' && value && value !== '') || (Array.isArray(value) && value.length > 0)) {
                 return (
                   <span key={key} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                     {key}: {Array.isArray(value) ? value.join(', ') : value}
@@ -1045,7 +1051,9 @@ export function AgentDashboard() {
 
       <div className="mt-8">
         <h2 className="text-2xl font-semibold text-gray-800 mb-4">Properties ({properties.length})</h2>
-        {filters.category && <p className="text-gray-600 mb-4">Showing {filters.category} properties</p>}
+        {filters.category && filters.category !== '' && (
+          <p className="text-gray-600 mb-4">Showing {filters.category} properties</p>
+        )}
 
         {properties.length === 0 ? (
           <div className="text-center py-12">
