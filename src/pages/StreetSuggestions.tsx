@@ -195,13 +195,14 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
           })
         );
 
+        // Sort by sold_count (descending), then total_properties, then listed_count
         statsArray.sort(
           (a, b) =>
+            b.sold_count - a.sold_count ||
             b.total_properties - a.total_properties ||
-            b.listed_count - a.listed_count ||
-            b.sold_count - a.sold_count
+            b.listed_count - a.listed_count
         );
-        setStreetStats(statsArray.slice(0, 5));
+        setStreetStats(statsArray); // Removed .slice(0, 5) to show all streets
       } catch (err: any) {
         console.error('Fetch error:', err);
         setError(`No data found for ${suburb}. Error: ${err.message}`);
