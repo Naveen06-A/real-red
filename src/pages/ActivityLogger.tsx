@@ -706,7 +706,28 @@ export function ActivityLogger() {
       setActivityLog((prev) => ({ ...prev, submitting: false }));
     }
   };
-
+// Update street selection handler
+const handleStreetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const value = e.target.value;
+  const plan = marketingPlans.find(p => p.id === selectedPlanId);
+  
+  if (value === 'custom') {
+    setIsCustomStreet(true);
+    setActivityLog(prev => ({ ...prev, street_name: '' }));
+  } else if (plan) {
+    setIsCustomStreet(false);
+    // Verify street exists in plan
+    const streetExists = activityLog.type === 'door_knock'
+      ? plan.door_knock_streets.some(s => s.name === value)
+      : plan.phone_call_streets.some(s => s.name === value);
+    
+    if (streetExists) {
+      setActivityLog(prev => ({ ...prev, street_name: value }));
+    } else {
+      toast.error('Selected street not found in marketing plan');
+    }
+  }
+};
   const getAvailableStreets = () => {
     const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
     if (!selectedPlan) return [];
