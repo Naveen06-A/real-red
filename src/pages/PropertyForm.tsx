@@ -1,10 +1,10 @@
 
-import { useState, useEffect } from 'react';
+import { AlertTriangle, ArrowRight, Building, Calendar, Droplet, Flame, Loader2, MapPin, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import { Building, ArrowRight, MapPin, Loader2, AlertTriangle, Flame, Droplet, X, Calendar } from 'lucide-react';
-import { useAuthStore } from '../store/authStore';
 import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../store/authStore';
 
 interface User {
   id: string;
@@ -650,101 +650,103 @@ export function PropertyForm() {
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!validateForm() || !user) return;
+  e.preventDefault();
+  if (!validateForm() || !user) return;
 
-    try {
-      const propertyData: any = {
-        street_number: formData.street_number,
-        street_name: formData.street_name,
-        bedrooms: parseInt(formData.bedrooms) || 0,
-        bathrooms: parseInt(formData.bathrooms) || 0,
-        car_garage: parseInt(formData.car_garage) || 0,
-        sqm: parseFloat(formData.sqm.replace(/,/g, '')) || 0,
-        landsize: parseFloat(formData.landsize.replace(/,/g, '')) || 0,
-        suburb: formData.suburb,
-        agent_name: formData.agent_name,
-        agency_name: formData.agency_name,
-        postcode: formData.postcode,
-        property_type: formData.property_type,
-        price: parseFloat(formData.price.replace(/,/g, '')),
-        offers_over: formData.offers_over,
-        expected_price: parseFloat(formData.expected_price.replace(/,/g, '')),
-        commission: parseFloat(formData.commission),
-        features: formData.features,
-        user_id: user.id,
-        created_at: new Date().toISOString(),
-        listed_date: formData.listed_date || null,
-        sold_date: formData.sold_date || null,
-        category: 'Listing',
-        sale_type: formData.sale_type,
-        flood_risk: formData.flood_risk,
-        bushfire_risk: formData.bushfire_risk,
-        contract_status: formData.contract_status,
-        same_street_sales: formData.same_street_sales,
-        days_on_market: formData.days_on_market,
-        past_records: formData.past_records?.map((record) => ({
-          ...record,
-          price: parseFloat(record.price.replace(/,/g, '')),
-          sqm: parseFloat(record.sqm?.replace(/,/g, '') || '0'),
-          landsize: parseFloat(record.landsize?.replace(/,/g, '') || '0'),
-        })),
-      };
+  try {
+    const propertyData: any = {
+      street_number: formData.street_number,
+      street_name: formData.street_name,
+      bedrooms: parseInt(formData.bedrooms) || 0,
+      bathrooms: parseInt(formData.bathrooms) || 0,
+      car_garage: parseInt(formData.car_garage) || 0,
+      sqm: parseFloat(formData.sqm.replace(/,/g, '')) || 0,
+      landsize: parseFloat(formData.landsize.replace(/,/g, '')) || 0,
+      suburb: formData.suburb,
+      agent_name: formData.agent_name,
+      agency_name: formData.agency_name,
+      postcode: formData.postcode,
+      property_type: formData.property_type,
+      price: parseFloat(formData.price.replace(/,/g, '')),
+      offers_over: formData.offers_over,
+      expected_price: parseFloat(formData.expected_price.replace(/,/g, '')),
+      commission: parseFloat(formData.commission),
+      features: formData.features,
+      user_id: user.id,
+      created_at: new Date().toISOString(),
+      listed_date: formData.listed_date || null,
+      sold_date: formData.sold_date || null,
+      category: 'Listing',
+      sale_type: formData.sale_type,
+      flood_risk: formData.flood_risk,
+      bushfire_risk: formData.bushfire_risk,
+      contract_status: formData.contract_status,
+      same_street_sales: formData.same_street_sales,
+      days_on_market: formData.days_on_market,
+      past_records: formData.past_records?.map((record) => ({
+        ...record,
+        price: parseFloat(record.price.replace(/,/g, '')),
+        sqm: parseFloat(record.sqm?.replace(/,/g, '') || '0'),
+        landsize: parseFloat(record.landsize?.replace(/,/g, '') || '0'),
+      })),
+    };
 
-      if (formData.flood_notes) propertyData.flood_notes = formData.flood_notes;
-      if (formData.bushfire_notes) propertyData.bushfire_notes = formData.bushfire_notes;
+    if (formData.flood_notes) propertyData.flood_notes = formData.flood_notes;
+    if (formData.bushfire_notes) propertyData.bushfire_notes = formData.bushfire_notes;
 
-      const { data, error } = await supabase
-        .from('properties')
-        .insert([propertyData])
-        .select()
-        .single();
+    const { data, error } = await supabase
+      .from('properties')
+      .insert([propertyData])
+      .select()
+      .single();
 
-      if (error) throw error;
-      if (!data) throw new Error('No data returned from the server');
+    if (error) throw error;
+    if (!data) throw new Error('No data returned from the server');
 
-      setSubmitted(true);
-      setToast({ message: 'Property listed successfully!', visible: true });
-      setTimeout(() => {
-        setToast({ message: '', visible: false });
-        if (profile?.role === 'agent') {
-          navigate('/agent-dashboard');
-        } else if (profile?.role === 'user') {
-          navigate('/');
-        } else {
-          navigate(`/property/${data.id}`, { state: { property: data } });
-        }
-      }, 2000);
-    } catch (err: any) {
-      setError(`Failed to submit property: ${err.message || 'Unknown error'}`);
-      console.error(err);
-      setTimeout(() => {
-        navigate('/agent-dashboard');
-      }, 2000);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="max-w-2xl mx-auto p-4 text-center">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
-        <p className="text-gray-600 mt-2">Loading authentication...</p>
-      </div>
-    );
-  }
-
-  if (!user || !profile || profile.role !== 'agent') {
+    setSubmitted(true);
+    setToast({ message: 'Property listed successfully!', visible: true });
     setTimeout(() => {
-      navigate('/agent-dashboard');
+      setToast({ message: '', visible: false });
+      if (profile?.role === 'admin') {
+        navigate('/admin-dashboard');
+      } else if (profile?.role === 'agent') {
+        navigate('/agent-dashboard');
+      } else if (profile?.role === 'user') {
+        navigate('/');
+      } else {
+        navigate(`/property/${data.id}`, { state: { property: data } });
+      }
     }, 2000);
-    return (
-      <div className="max-w-2xl mx-auto p-4 text-center">
-        <h2 className="text-2xl font-bold text-red-600">Access Denied</h2>
-        <p className="text-gray-600 mt-2">Only agents can add properties. Redirecting to dashboard...</p>
-        <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mt-4" />
-      </div>
-    );
+  } catch (err: any) {
+    setError(`Failed to submit property: ${err.message || 'Unknown error'}`);
+    console.error(err);
+    setTimeout(() => {
+      navigate(profile?.role === 'admin' ? '/admin-dashboard' : '/agent-dashboard');
+    }, 2000);
   }
+};
+
+if (loading) {
+  return (
+    <div className="max-w-2xl mx-auto p-4 text-center">
+      <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+      <p className="text-gray-600 mt-2">Loading authentication...</p>
+    </div>
+  );
+}
+
+if (!user || !profile || (profile.role !== 'agent' && profile.role !== 'admin')) {
+  setTimeout(() => {
+    navigate(profile?.role === 'admin' ? '/admin-dashboard' : '/agent-dashboard');
+  }, 2000);
+  return (
+    <div className="max-w-2xl mx-auto p-4 text-center">
+      <h2 className="text-2xl font-bold text-red-600">Access Denied</h2>
+      <p className="text-gray-600 mt-2">Only agents or admins can add properties. Redirecting to dashboard...</p>
+      <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mt-4" />
+    </div>
+  );
+}
 
   if (submitted) {
     return (

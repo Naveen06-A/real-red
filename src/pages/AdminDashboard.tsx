@@ -1,5 +1,4 @@
-
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, Component, ReactNode } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
 import { Trash2, Bell, UserPlus, X, Search, Download } from 'lucide-react';
@@ -9,7 +8,9 @@ import { Link } from 'react-router-dom';
 import { debounce } from 'lodash';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import * as tf from '@tensorflow/tfjs';
-
+import { PropertyForm } from './PropertyForm';
+import { MarketingPlan} from './MarketingPlan'
+import { CommissionByAgency } from './CommissionByAgency';
 interface Agent {
   id: string;
   agent_id: string;
@@ -68,7 +69,29 @@ interface PredictionResult {
   estimatedValue?: number | null;
 }
 
+// Error Boundary Component
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="text-center p-8">
+          <h2 className="text-2xl font-bold text-red-600">Something went wrong</h2>
+          <p className="text-gray-600 mt-2">An error occurred while rendering this section. Please try again or contact support.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function AdminDashboard() {
+  
   const { profile, fetchProfile } = useAuthStore();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -160,7 +183,15 @@ export function AdminDashboard() {
         .select('id, agent_id, email, role, permissions')
         .eq('role', 'agent');
       if (error) throw new Error(`Failed to fetch agents: ${error.message}`);
-      setAgents(data || []);
+      console.log('Fetched agents:', data);
+      setAgents(data?.map(agent => ({
+        ...agent,
+        permissions: agent.permissions ?? {
+          canRegisterProperties: false,
+          canEditProperties: false,
+          canDeleteProperties: false,
+        },
+      })) || []);
       return true;
     } catch (error: any) {
       console.error('Error fetching agents:', error);
@@ -205,7 +236,7 @@ export function AdminDashboard() {
       setFetchAttempts((prev) => prev + 1);
       const { data, error } = await supabase
         .from('properties')
-        .select('id');
+        .select('id, property_type, price');
       if (error) {
         console.error('Supabase error details:', error);
         throw new Error(`Failed to fetch properties: ${error.message} (Code: ${error.code})`);
@@ -227,7 +258,7 @@ export function AdminDashboard() {
   const debouncedUpdatePermissions = useCallback(
     debounce(async (agentId: string, permissions: Agent['permissions']) => {
       try {
-        console.log('Updating permissions for agent:', agentId);
+        console.log('Updating permissions for agent:', agentId, permissions);
         const { error } = await supabase
           .from('profiles')
           .update({ permissions })
@@ -559,7 +590,7 @@ export function AdminDashboard() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8 min-h-screen">
       <Toaster />
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
@@ -612,275 +643,297 @@ export function AdminDashboard() {
         >
           Agent Reports
         </button>
+        <button
+          onClick={() => setActiveTab('property-form')}
+          className={`pb-2 px-4 text-sm font-medium ${activeTab === 'property-form' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+          aria-selected={activeTab === 'property-form'}
+        >
+          Add Property
+        </button>
+        <button
+          onClick={() => setActiveTab('commission-by-agency')}
+          className={`pb-2 px-4 text-sm font-medium ${activeTab === 'commission-by-agency' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+          aria-selected={activeTab === 'commission-by-agency'}
+        >
+          Commissions
+        </button>
+        <button
+          onClick={() => setActiveTab('marketing-plan')}
+            className={`px-4 py-2 rounded-full ${activeTab === 'marketing-plan' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+            aria-selected={activeTab === 'marketing-plan'}
+            >
+            Marketing Plan
+          </button>
       </div>
 
       {activeTab === 'management' && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          {fetchError && (
-            <div className="bg-red-100 p-4 rounded-lg text-red-600 mb-4">
-              <p>{fetchError}</p>
-              <p className="text-sm mt-2">
-                Run this SQL to check schema:
-                <br />
-                <code>SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'properties';</code>
-              </p>
-              {fetchAttempts < MAX_FETCH_ATTEMPTS && (
-                <button
-                  onClick={() => fetchProperties()}
-                  className="mt-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded"
-                >
-                  Retry Fetch
-                </button>
-              )}
-            </div>
-          )}
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Agent Management</h2>
-            <button
-              onClick={() => setShowAgentModal(true)}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-              aria-label="Add new agent"
-            >
-              <UserPlus className="w-5 h-5" />
-              <span>Add New Agent</span>
-            </button>
-          </div>
-          {agents.length === 0 ? (
-            <p className="text-center text-gray-600">No agents found. Add a new agent to get started.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Register</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Edit</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delete</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredAgents.map((agent) => (
-                    <tr key={agent.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-sm text-gray-900">{agent.agent_id}</td>
-                      <td className="px-6 py-4 text-sm text-gray-900">{agent.email}</td>
-                      <td className="px-6 py-4">
-                        <input
-                          type="checkbox"
-                          checked={agent.permissions.canRegisterProperties}
-                          onChange={(e) =>
-                            debouncedUpdatePermissions(agent.id, {
-                              ...agent.permissions,
-                              canRegisterProperties: e.target.checked,
-                            })
-                          }
-                          className="h-4 w-4 text-blue-600 rounded"
-                          aria-label={`Toggle register permission for ${agent.email}`}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <input
-                          type="checkbox"
-                          checked={agent.permissions.canEditProperties}
-                          onChange={(e) =>
-                            debouncedUpdatePermissions(agent.id, {
-                              ...agent.permissions,
-                              canEditProperties: e.target.checked,
-                            })
-                          }
-                          className="h-4 w-4 text-blue-600 rounded"
-                          aria-label={`Toggle edit permission for ${agent.email}`}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <input
-                          type="checkbox"
-                          checked={agent.permissions.canDeleteProperties}
-                          onChange={(e) =>
-                            debouncedUpdatePermissions(agent.id, {
-                              ...agent.permissions,
-                              canDeleteProperties: e.target.checked,
-                            })
-                          }
-                          className="h-4 w-4 text-blue-600 rounded"
-                          aria-label={`Toggle delete permission for ${agent.email}`}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={() => deleteAgent(agent.id)}
-                          className="text-red-600 hover:text-red-900"
-                          aria-label={`Delete agent ${agent.email}`}
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'reports' && (
-        <div className="space-y-6">
-          {fetchError && (
-            <div className="bg-red-100 p-4 rounded-lg text-red-600">
-              <p>{fetchError}</p>
-              <p className="text-sm mt-2">
-                Run this SQL to check schema:
-                <br />
-                <code>SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'properties';</code>
-              </p>
-              {fetchAttempts < MAX_FETCH_ATTEMPTS && (
-                <button
-                  onClick={() => fetchProperties()}
-                  className="mt-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded"
-                >
-                  Retry Fetch
-                </button>
-              )}
-            </div>
-          )}
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">Agent Reports</h2>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by email, agent ID, notes, or tags..."
-                  className="pl-10 p-2 border rounded focus:ring-2 focus:ring-blue-500"
-                  aria-label="Search agents"
-                />
-              </div>
+        <ErrorBoundary>
+          <div className="bg-white rounded-lg shadow-md p-6">
+            {console.log('Rendering management tab, agents:', agents, 'filteredAgents:', filteredAgents)}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">Agent Management</h2>
               <button
-                onClick={exportToCSV}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                aria-label="Export agent reports to CSV"
+                onClick={() => setShowAgentModal(true)}
+                className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                aria-label="Add new agent"
               >
-                <Download className="w-5 h-5 mr-2" />
-                Export to CSV
+                <UserPlus className="w-5 h-5" />
+                <span>Add New Agent</span>
               </button>
             </div>
-          </div>
-
-          {topAgent ? (
-            <div className="bg-white p-6 rounded-lg shadow-md transform hover:scale-105 transition-transform">
-              <h3 className="text-lg font-semibold mb-2">Top Performing Agent</h3>
-              <p className="text-gray-600">Agent: {topAgent.email} ({topAgent.agent_id})</p>
-              <p className="text-gray-600">
-                Weekly Trend: {calculatePerformanceMetrics(activities.filter((a) => a.agent_id === topAgent.id)).weeklyTrend.toFixed(2)}%
-              </p>
-              <p className="text-gray-600">
-                Top Activity: {calculatePerformanceMetrics(activities.filter((a) => a.agent_id === topAgent.id)).topActivity?.replace('_', ' ') || 'N/A'}
-              </p>
-            </div>
-          ) : (
-            <p className="text-center text-gray-600">No top agent data available.</p>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="text-lg font-semibold mb-4">Activity Trends</h3>
-              {chartData.length > 0 ? (
-                <BarChart width={500} height={300} data={chartData} className="mx-auto">
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="phone_call" fill="#8884d8" name="Phone Calls" />
-                  <Bar dataKey="client_meeting" fill="#82ca9d" name="Meetings" />
-                  <Bar dataKey="door_knock" fill="#ffc658" name="Knocks" />
-                  <Bar dataKey="connection" fill="#ff7300" name="Connections" />
-                </BarChart>
-              ) : (
-                <p className="text-center text-gray-600">No activity trends available.</p>
-              )}
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h3 className="text-lg font-semibold mb-4">Activity Distribution</h3>
-              {pieData.length > 0 ? (
-                <PieChart width={400} height={400} className="mx-auto">
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(2)}%`}
-                    outerRadius={120}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {pieData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              ) : (
-                <p className="text-center text-gray-600">No activity distribution available.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h3 className="text-lg font-semibold mb-4">Agent Performance</h3>
-            {filteredAgents.length > 0 ? (
+            {agents.length === 0 ? (
+              <p className="text-center text-gray-600">No agents found. Add a new agent to get started.</p>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Trend</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top Activity</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Market Prediction</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Register</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Edit</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delete</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredAgents.map((agent) => {
-                      const agentActivities = activities.filter((a) => a.agent_id === agent.id);
-                      const metrics = calculatePerformanceMetrics(agentActivities);
-                      const prediction = predictions[agent.id];
-
-                      return (
-                        <tr key={agent.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 text-sm text-gray-900">{agent.email}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">
-                            <span className={metrics.weeklyTrend >= 0 ? 'text-green-600' : 'text-red-600'}>
-                              {metrics.weeklyTrend.toFixed(1)}%
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-900 capitalize">
-                            {metrics.topActivity?.replace('_', ' ') || 'N/A'}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-900">
-                            {prediction && prediction.confidence ? (
-                              <span className={`font-medium ${prediction.recommendation === 'BUY' ? 'text-green-600' : prediction.recommendation === 'SELL' ? 'text-red-600' : 'text-gray-600'}`}>
-                                {prediction.recommendation} ({prediction.confidence.toFixed(1)}% confidence)
-                              </span>
-                            ) : (
-                              'No prediction available'
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {filteredAgents.map((agent) => (
+                      <tr key={agent.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 text-sm text-gray-900">{agent.agent_id}</td>
+                        <td className="px-6 py-4 text-sm text-gray-900">{agent.email}</td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            checked={agent.permissions?.canRegisterProperties ?? false}
+                            onChange={(e) =>
+                              debouncedUpdatePermissions(agent.id, {
+                                ...agent.permissions,
+                                canRegisterProperties: e.target.checked,
+                              })
+                            }
+                            className="h-4 w-4 text-blue-600 rounded"
+                            aria-label={`Toggle register permission for ${agent.email}`}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            checked={agent.permissions?.canEditProperties ?? false}
+                            onChange={(e) =>
+                              debouncedUpdatePermissions(agent.id, {
+                                ...agent.permissions,
+                                canEditProperties: e.target.checked,
+                              })
+                            }
+                            className="h-4 w-4 text-blue-600 rounded"
+                            aria-label={`Toggle edit permission for ${agent.email}`}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <input
+                            type="checkbox"
+                            checked={agent.permissions?.canDeleteProperties ?? false}
+                            onChange={(e) =>
+                              debouncedUpdatePermissions(agent.id, {
+                                ...agent.permissions,
+                                canDeleteProperties: e.target.checked,
+                              })
+                            }
+                            className="h-4 w-4 text-blue-600 rounded"
+                            aria-label={`Toggle delete permission for ${agent.email}`}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => deleteAgent(agent.id)}
+                            className="text-red-600 hover:text-red-900"
+                            aria-label={`Delete agent ${agent.email}`}
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-            ) : (
-              <p className="text-center text-gray-600">No agents match your search.</p>
             )}
           </div>
-        </div>
+        </ErrorBoundary>
+      )}
+      {activeTab === 'property-form' && (
+        <ErrorBoundary>
+          <PropertyForm />
+        </ErrorBoundary>
+      )}
+      {activeTab === 'commission-by-agency' && (
+        <ErrorBoundary>
+          <CommissionByAgency />
+        </ErrorBoundary>
+      )}
+      {activeTab === 'marketing-plan' && (
+        <ErrorBoundary>
+          <MarketingPLan />
+        </ErrorBoundary>
+      )}
+      {activeTab === 'reports' && (
+        <ErrorBoundary>
+          <div className="space-y-6">
+            {fetchError && (
+              <div className="bg-red-100 p-4 rounded-lg text-red-600">
+                <p>{fetchError}</p>
+                <p className="text-sm mt-2">
+                  Run this SQL to check schema:
+                  <br />
+                  <code>SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'properties';</code>
+                </p>
+                {fetchAttempts < MAX_FETCH_ATTEMPTS && (
+                  <button
+                    onClick={() => fetchProperties()}
+                    className="mt-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded"
+                  >
+                    Retry Fetch
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900">Agent Reports</h2>
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by email, agent ID, notes, or tags..."
+                    className="pl-10 p-2 border rounded focus:ring-2 focus:ring-blue-500"
+                    aria-label="Search agents"
+                  />
+                </div>
+                <button
+                  onClick={exportToCSV}
+                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  aria-label="Export agent reports to CSV"
+                >
+                  <Download className="w-5 h-5 mr-2" />
+                  Export to CSV
+                </button>
+              </div>
+            </div>
+
+            {topAgent ? (
+              <div className="bg-white p-6 rounded-lg shadow-md transform hover:scale-105 transition-transform">
+                <h3 className="text-lg font-semibold mb-2">Top Performing Agent</h3>
+                <p className="text-gray-600">Agent: {topAgent.email} ({topAgent.agent_id})</p>
+                <p className="text-gray-600">
+                  Weekly Trend: {calculatePerformanceMetrics(activities.filter((a) => a.agent_id === topAgent.id)).weeklyTrend.toFixed(2)}%
+                </p>
+                <p className="text-gray-600">
+                  Top Activity: {calculatePerformanceMetrics(activities.filter((a) => a.agent_id === topAgent.id)).topActivity?.replace('_', ' ') || 'N/A'}
+                </p>
+              </div>
+            ) : (
+              <p className="text-center text-gray-600">No top agent data available.</p>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-lg font-semibold mb-4">Activity Trends</h3>
+                {chartData.length > 0 ? (
+                  <BarChart width={500} height={300} data={chartData} className="mx-auto">
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="phone_call" fill="#8884d8" name="Phone Calls" />
+                    <Bar dataKey="client_meeting" fill="#82ca9d" name="Meetings" />
+                    <Bar dataKey="door_knock" fill="#ffc658" name="Knocks" />
+                    <Bar dataKey="connection" fill="#ff7300" name="Connections" />
+                  </BarChart>
+                ) : (
+                  <p className="text-center text-gray-600">No activity trends available.</p>
+                )}
+              </div>
+              <div className="bg-white p-6 rounded-lg shadow-md">
+                <h3 className="text-lg font-semibold mb-4">Activity Distribution</h3>
+                {pieData.length > 0 ? (
+                  <PieChart width={400} height={400} className="mx-auto">
+                    <Pie
+                      data={pieData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(2)}%`}
+                      outerRadius={120}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {pieData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                ) : (
+                  <p className="text-center text-gray-600">No activity distribution available.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-md">
+              <h3 className="text-lg font-semibold mb-4">Agent Performance</h3>
+              {filteredAgents.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Trend</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Top Activity</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Market Prediction</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredAgents.map((agent) => {
+                        const agentActivities = activities.filter((a) => a.agent_id === agent.id);
+                        const metrics = calculatePerformanceMetrics(agentActivities);
+                        const prediction = predictions[agent.id];
+
+                        return (
+                          <tr key={agent.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 text-sm text-gray-900">{agent.email}</td>
+                            <td className="px-6 py-4 text-sm text-gray-900">
+                              <span className={metrics.weeklyTrend >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                {metrics.weeklyTrend.toFixed(1)}%
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900 capitalize">
+                              {metrics.topActivity?.replace('_', ' ') || 'N/A'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900">
+                              {prediction && prediction.confidence ? (
+                                <span className={`font-medium ${prediction.recommendation === 'BUY' ? 'text-green-600' : prediction.recommendation === 'SELL' ? 'text-red-600' : 'text-gray-600'}`}>
+                                  {prediction.recommendation} ({prediction.confidence.toFixed(1)}% confidence)
+                                </span>
+                              ) : (
+                                'No prediction available'
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-center text-gray-600">No agents match your search.</p>
+              )}
+            </div>
+          </div>
+        </ErrorBoundary>
       )}
 
       {showAgentModal && (

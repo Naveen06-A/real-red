@@ -1,3 +1,4 @@
+// App.tsx
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Home } from './pages/Home';
@@ -22,9 +23,9 @@ import { ProgressReportPage } from './pages/ProgressReportPage';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { CommissionByAgency } from './pages/CommissionByAgency';
 import { ComparisonReport } from './pages/Comparisons';
+import PropertyReportPage from './pages/PropertyReportPage'; // Ensure correct path
 import { CreateAdmin } from './pages/CreateAdmin';
-// import { AgentManagement } from './pages/AgentManagement';
-import { AdminLogin } from './pages/AdminLogin'; // Added import for AdminLogin
+import { AdminLogin } from './pages/AdminLogin';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
@@ -131,7 +132,6 @@ function App() {
                 </AdminRoute>
               }
             />
-          
             <Route
               path="/agent-dashboard"
               element={
@@ -177,6 +177,14 @@ function App() {
               element={
                 <AgentRoute>
                   <Reports />
+                </AgentRoute>
+              }
+            />
+            <Route
+              path="/property-report-page"
+              element={
+                <AgentRoute>
+                  <PropertyReportPage />
                 </AgentRoute>
               }
             />

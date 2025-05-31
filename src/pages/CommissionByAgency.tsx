@@ -21,18 +21,17 @@ import autoTable from 'jspdf-autotable';
 import { utils, writeFile } from 'xlsx';
 import {
   Download,
-  BarChart,
   ChevronLeft,
   ChevronRight,
-  Home,
-  Building2,
-  User,
   Star,
   MapPin,
   ChevronDown,
   ChevronUp,
+  Pencil,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { useNavigate } from 'react-router-dom';
 
 // Register ChartJS components
 ChartJS.register(BarElement, CategoryScale, LinearScale, ArcElement, Tooltip, Legend);
@@ -43,6 +42,7 @@ interface User {
   email?: string;
   agent_name?: string;
   agency_name?: string;
+  role?: string;
 }
 
 interface CommissionSummary {
@@ -69,11 +69,38 @@ interface AgentTotal {
   totalCommission: number;
   propertiesListed: number;
   propertiesSold: number;
+  commissionRate?: number;
+}
+
+interface CommissionEditState {
+  isOpen: boolean;
+  agency: string | null;
+  newCommission: string;
+}
+
+interface AgentCommissionEditState {
+  isOpen: boolean;
+  agency: string | null;
+  agent: string | null;
+  newCommission: string;
+}
+
+interface AgentCommission {
+  id?: string;
+  property_id: string;
+  agent_name: string;
+  commission_rate: number;
 }
 
 // Helper Functions
-const calculateCommission = (property: PropertyDetails): { commissionRate: number; commissionEarned: number } => {
-  const commissionRate = property.commission || 0;
+const calculateCommission = (
+  property: PropertyDetails,
+  agentCommissions: AgentCommission[]
+): { commissionRate: number; commissionEarned: number } => {
+  const agentCommission = agentCommissions.find(
+    (ac) => ac.property_id === property.id && ac.agent_name === normalizeAgentName(property.agent_name)
+  );
+  const commissionRate = agentCommission?.commission_rate || property.commission || 0;
   const basePrice = property.sold_price || property.price || 0;
   const commissionEarned = commissionRate > 0 && basePrice > 0 ? basePrice * (commissionRate / 100) : 0;
   return { commissionRate, commissionEarned };
@@ -185,14 +212,15 @@ const ProgressBar: React.FC<{ value: number; label: string; maxValue: number }> 
   );
 };
 
-export default function CommissionByAgency() {
+function CommissionByAgency() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'listed' | 'sold'>('all');
   const [dateRange, setDateRange] = useState<'all' | 'last30' | 'last90'>('all');
   const [selectedAgency, setSelectedAgency] = useState<string | null>(null);
   const [internalCommissionData, setInternalCommissionData] = useState<Record<string, Record<string, number>> | null>(null);
-  const [internalAgentData, setInternalAgentData] = useState<Record<string, { commission: number; listed: number; sold: number }>>({});
+  const [internalAgentData, setInternalAgentData] = useState<Record<string, { commission: number; listed: number; sold: number; commissionRate?: number }>>({});
   const [internalProperties, setInternalProperties] = useState<PropertyDetails[]>([]);
+  const [agentCommissions, setAgentCommissions] = useState<AgentCommission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -203,33 +231,59 @@ export default function CommissionByAgency() {
     agents: true,
     streets: true,
   });
+  const [commissionEdit, setCommissionEdit] = useState<CommissionEditState>({
+    isOpen: false,
+    agency: null,
+    newCommission: '',
+  });
+  const [agentCommissionEdit, setAgentCommissionEdit] = useState<AgentCommissionEditState>({
+    isOpen: false,
+    agency: null,
+    agent: null,
+    newCommission: '',
+  });
+  const [isUpdatingCommission, setIsUpdatingCommission] = useState(false);
+  const [isUpdatingAgentCommission, setIsUpdatingAgentCommission] = useState(false);
   const itemsPerPage = 10;
   const ourAgencyName = 'Harcourts Success';
   const { user } = useAuthStore((state: { user: User | null }) => ({ user: state.user }));
   const ourAgentName = user?.agent_name || 'Unknown';
+  const isAdmin = user?.role === 'admin';
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchCommissionData = async () => {
       setIsLoading(true);
       setFetchError(null);
       try {
+        // Fetch properties
         const { data: propertiesData, error: propertiesError } = await supabase
           .from('properties')
           .select('id, agency_name, property_type, commission, price, sold_price, suburb, street_name, street_number, agent_name, postcode, category, listed_date, sale_type, expected_price, features, flood_risk, bushfire_risk, contract_status, same_street_sales, past_records, sold_date');
 
         if (propertiesError) throw propertiesError;
 
+        // Fetch agent commissions
+        const { data: agentCommissionsData, error: agentCommissionsError } = await supabase
+          .from('agent_commissions')
+          .select('id, property_id, agent_name, commission_rate');
+
+        if (agentCommissionsError) throw agentCommissionsError;
+
         const fetchedProperties = (propertiesData as PropertyDetails[]) || [];
+        const fetchedAgentCommissions = (agentCommissionsData as AgentCommission[]) || [];
+
         setInternalProperties(fetchedProperties);
+        setAgentCommissions(fetchedAgentCommissions);
 
         const newCommissionMap: Record<string, Record<string, number>> = {};
-        const newAgentMap: Record<string, { commission: number; listed: number; sold: number }> = {};
+        const newAgentMap: Record<string, { commission: number; listed: number; sold: number; commissionRate?: number }> = {};
 
         fetchedProperties.forEach((property) => {
           const agency = normalizeAgencyName(property.agency_name);
           const agent = normalizeAgentName(property.agent_name);
           const propertyType = property.property_type || 'Unknown';
-          const { commissionEarned } = calculateCommission(property);
+          const { commissionEarned, commissionRate } = calculateCommission(property, fetchedAgentCommissions);
           const isSold = property.contract_status === 'sold' || !!property.sold_date;
 
           if (agency && commissionEarned > 0) {
@@ -238,10 +292,16 @@ export default function CommissionByAgency() {
           }
 
           if (agent) {
-            newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0 };
+            newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
             newAgentMap[agent].listed += 1;
             newAgentMap[agent].sold += isSold ? 1 : 0;
             newAgentMap[agent].commission += commissionEarned;
+            if (!newAgentMap[agent].commissionRate) {
+              const agentPropertyCommission = fetchedAgentCommissions.find(
+                (ac) => ac.property_id === property.id && ac.agent_name === agent
+              );
+              newAgentMap[agent].commissionRate = agentPropertyCommission?.commission_rate;
+            }
           }
         });
 
@@ -257,6 +317,178 @@ export default function CommissionByAgency() {
     };
     fetchCommissionData();
   }, []);
+
+  const updateAgencyCommission = useCallback(async () => {
+    if (!commissionEdit.agency || !isAdmin) return;
+
+    const commissionValue = parseFloat(commissionEdit.newCommission);
+    if (isNaN(commissionValue) || commissionValue <= 0 || commissionValue > 10) {
+      toast.error('Commission rate must be between 0% and 10%.');
+      return;
+    }
+
+    setIsUpdatingCommission(true);
+    try {
+      const { error } = await supabase
+        .from('properties')
+        .update({ commission: commissionValue })
+        .eq('agency_name', commissionEdit.agency);
+
+      if (error) throw error;
+
+      const { data: propertiesData, error: propertiesError } = await supabase
+        .from('properties')
+        .select('id, agency_name, property_type, commission, price, sold_price, suburb, street_name, street_number, agent_name, postcode, category, listed_date, sale_type, expected_price, features, flood_risk, bushfire_risk, contract_status, same_street_sales, past_records, sold_date');
+
+      const { data: agentCommissionsData, error: agentCommissionsError } = await supabase
+        .from('agent_commissions')
+        .select('id, property_id, agent_name, commission_rate');
+
+      if (propertiesError || agentCommissionsError) throw propertiesError || agentCommissionsError;
+
+      const fetchedProperties = (propertiesData as PropertyDetails[]) || [];
+      const fetchedAgentCommissions = (agentCommissionsData as AgentCommission[]) || [];
+
+      setInternalProperties(fetchedProperties);
+      setAgentCommissions(fetchedAgentCommissions);
+
+      const newCommissionMap: Record<string, Record<string, number>> = {};
+      const newAgentMap: Record<string, { commission: number; listed: number; sold: number; commissionRate?: number }> = {};
+
+      fetchedProperties.forEach((property) => {
+        const agency = normalizeAgencyName(property.agency_name);
+        const agent = normalizeAgentName(property.agent_name);
+        const propertyType = property.property_type || 'Unknown';
+        const { commissionEarned, commissionRate } = calculateCommission(property, fetchedAgentCommissions);
+        const isSold = property.contract_status === 'sold' || !!property.sold_date;
+
+        if (agency && commissionEarned > 0) {
+          newCommissionMap[agency] = newCommissionMap[agency] || {};
+          newCommissionMap[agency][propertyType] = (newCommissionMap[agency][propertyType] || 0) + commissionEarned;
+        }
+
+        if (agent) {
+          newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
+          newAgentMap[agent].listed += 1;
+          newAgentMap[agent].sold += isSold ? 1 : 0;
+          newAgentMap[agent].commission += commissionEarned;
+          if (!newAgentMap[agent].commissionRate) {
+            const agentPropertyCommission = fetchedAgentCommissions.find(
+              (ac) => ac.property_id === property.id && ac.agent_name === agent
+            );
+            newAgentMap[agent].commissionRate = agentPropertyCommission?.commission_rate;
+          }
+        }
+      });
+
+      setInternalCommissionData(newCommissionMap);
+      setInternalAgentData(newAgentMap);
+      toast.success(`Commission rate for ${commissionEdit.agency} updated to ${commissionValue}%.`);
+      setCommissionEdit({ isOpen: false, agency: null, newCommission: '' });
+    } catch (error: any) {
+      console.error('Error updating commission:', error);
+      toast.error(error.message || 'Failed to update commission rate.');
+    } finally {
+      setIsUpdatingCommission(false);
+    }
+  }, [commissionEdit, isAdmin]);
+
+  const updateAgentCommission = useCallback(async () => {
+    if (!agentCommissionEdit.agency || !agentCommissionEdit.agent || !isAdmin) return;
+
+    const commissionValue = parseFloat(agentCommissionEdit.newCommission);
+    if (isNaN(commissionValue) || commissionValue <= 0 || commissionValue > 10) {
+      toast.error('Commission rate must be between 0% and 10%.');
+      return;
+    }
+
+    setIsUpdatingAgentCommission(true);
+    try {
+      const properties = internalProperties.filter(
+        (p) => normalizeAgencyName(p.agency_name) === agentCommissionEdit.agency && normalizeAgentName(p.agent_name) === agentCommissionEdit.agent
+      );
+
+      for (const property of properties) {
+        const existingCommission = agentCommissions.find(
+          (ac) => ac.property_id === property.id && ac.agent_name === agentCommissionEdit.agent
+        );
+
+        if (existingCommission) {
+          const { error } = await supabase
+            .from('agent_commissions')
+            .update({ commission_rate: commissionValue })
+            .eq('id', existingCommission.id);
+
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('agent_commissions')
+            .insert({
+              property_id: property.id,
+              agent_name: agentCommissionEdit.agent,
+              commission_rate: commissionValue,
+            });
+
+          if (error) throw error;
+        }
+      }
+
+      const { data: propertiesData, error: propertiesError } = await supabase
+        .from('properties')
+        .select('id, agency_name, property_type, commission, price, sold_price, suburb, street_name, street_number, agent_name, postcode, category, listed_date, sale_type, expected_price, features, flood_risk, bushfire_risk, contract_status, same_street_sales, past_records, sold_date');
+
+      const { data: agentCommissionsData, error: agentCommissionsError } = await supabase
+        .from('agent_commissions')
+        .select('id, property_id, agent_name, commission_rate');
+
+      if (propertiesError || agentCommissionsError) throw propertiesError || agentCommissionsError;
+
+      const fetchedProperties = (propertiesData as PropertyDetails[]) || [];
+      const fetchedAgentCommissions = (agentCommissionsData as AgentCommission[]) || [];
+
+      setInternalProperties(fetchedProperties);
+      setAgentCommissions(fetchedAgentCommissions);
+
+      const newCommissionMap: Record<string, Record<string, number>> = {};
+      const newAgentMap: Record<string, { commission: number; listed: number; sold: number; commissionRate?: number }> = {};
+
+      fetchedProperties.forEach((property) => {
+        const agency = normalizeAgencyName(property.agency_name);
+        const agent = normalizeAgentName(property.agent_name);
+        const propertyType = property.property_type || 'Unknown';
+        const { commissionEarned, commissionRate } = calculateCommission(property, fetchedAgentCommissions);
+        const isSold = property.contract_status === 'sold' || !!property.sold_date;
+
+        if (agency && commissionEarned > 0) {
+          newCommissionMap[agency] = newCommissionMap[agency] || {};
+          newCommissionMap[agency][propertyType] = (newCommissionMap[agency][propertyType] || 0) + commissionEarned;
+        }
+
+        if (agent) {
+          newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
+          newAgentMap[agent].listed += 1;
+          newAgentMap[agent].sold += isSold ? 1 : 0;
+          newAgentMap[agent].commission += commissionEarned;
+          if (!newAgentMap[agent].commissionRate) {
+            const agentPropertyCommission = fetchedAgentCommissions.find(
+              (ac) => ac.property_id === property.id && ac.agent_name === agent
+            );
+            newAgentMap[agent].commissionRate = agentPropertyCommission?.commission_rate;
+          }
+        }
+      });
+
+      setInternalCommissionData(newCommissionMap);
+      setInternalAgentData(newAgentMap);
+      toast.success(`Commission rate for agent ${agentCommissionEdit.agent} in ${agentCommissionEdit.agency} updated to ${commissionValue}%.`);
+      setAgentCommissionEdit({ isOpen: false, agency: null, agent: null, newCommission: '' });
+    } catch (error: any) {
+      console.error('Error updating agent commission:', error);
+      toast.error(error.message || 'Failed to update agent commission rate.');
+    } finally {
+      setIsUpdatingAgentCommission(false);
+    }
+  }, [agentCommissionEdit, isAdmin, internalProperties, agentCommissions]);
 
   const calculateSummary = useCallback((): CommissionSummary => {
     let totalCommission = 0;
@@ -278,7 +510,7 @@ export default function CommissionByAgency() {
     internalProperties.forEach((property) => {
       const agency = normalizeAgencyName(property.agency_name);
       const agent = normalizeAgentName(property.agent_name);
-      const { commissionEarned } = calculateCommission(property);
+      const { commissionEarned } = calculateCommission(property, agentCommissions);
       const street = `${property.street_name}, ${normalizeSuburbName(property.suburb)}`;
 
       if (agency && internalCommissionData.hasOwnProperty(agency)) {
@@ -311,7 +543,7 @@ export default function CommissionByAgency() {
     );
 
     return { totalCommission, totalProperties, topAgency, topAgent, agencyPropertyCounts, topStreet };
-  }, [internalCommissionData, internalProperties, internalAgentData]);
+  }, [internalCommissionData, internalProperties, internalAgentData, agentCommissions]);
 
   const summary = calculateSummary();
 
@@ -332,13 +564,14 @@ export default function CommissionByAgency() {
       }
       if (agency && agent) {
         agencyAgentsMap[agency] = agencyAgentsMap[agency] || [];
-        const agentData = internalAgentData[agent] || { commission: 0, listed: 0, sold: 0 };
+        const agentData = internalAgentData[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
         if (!agencyAgentsMap[agency].some((a) => a.name === agent)) {
           agencyAgentsMap[agency].push({
             name: agent,
             totalCommission: agentData.commission,
             propertiesListed: agentData.listed,
             propertiesSold: agentData.sold,
+            commissionRate: agentData.commissionRate,
           });
         }
       }
@@ -380,7 +613,6 @@ export default function CommissionByAgency() {
     setCurrentPage(page);
   };
 
-  // Chart Data
   const propertyTypes = useMemo(
     () =>
       Array.from(
@@ -463,14 +695,13 @@ export default function CommissionByAgency() {
             const value = context.parsed;
             const agent = context.label;
             const agentData = topFiveAgents.find((a) => a.name === agent);
-            return `${agent}: ${formatCurrency(value)}\nListed: ${agentData?.listed || 0}, Sold: ${agentData?.sold || 0}`;
+            return `${agent}: ${formatCurrency(value)}\nListed: ${agentData?.listed || 0}, Sold: ${agentData?.sold || 0}\nCommission Rate: ${agentData?.commissionRate ? `${agentData.commissionRate}%` : 'Agency Default'}`;
           },
         },
       },
     },
   };
 
-  // Export Functions
   interface JsPDFWithAutoTable extends jsPDF {
     autoTable: (content: { head: string[][]; body: string[][] }, options?: any) => void;
     lastAutoTable: { finalY: number };
@@ -480,14 +711,13 @@ export default function CommissionByAgency() {
     const doc = new jsPDF() as JsPDFWithAutoTable;
     doc.setFont('Inter', 'normal');
     doc.setFontSize(20);
-    doc.setTextColor(79, 70, 229); // Indigo-600
+    doc.setTextColor(79, 70, 229);
     doc.text('Commission Performance Report', 20, 20);
     doc.setFontSize(12);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 20, 30);
     doc.setFontSize(10);
-    doc.text('Harcourts Success - Powered by xAI', 20, 38);
+    doc.text('Harcourts Success', 20, 38);
 
-    // Summary
     doc.autoTable({
       head: [['Metric', 'Value']],
       body: [
@@ -497,43 +727,44 @@ export default function CommissionByAgency() {
         ['Top Agent', `${summary.topAgent.name} (${formatCurrency(summary.topAgent.commission)})`],
         ['Most Active Street', `${summary.topStreet.street} (${summary.topStreet.listedCount} listed, ${formatCurrency(summary.topStreet.commission)})`],
         ['Our Agency', `${ourAgencyName} (${formatCurrency(ourAgency?.totalCommission || 0)}, ${ourAgency?.propertyCount || 0} properties)`],
-        ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission)})` : 'N/A'],
-      ]
-    }, {
+        ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission || 0)})` : 'N/A'],
+      ],
       startY: 50,
       theme: 'striped',
       headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], font: 'Inter' },
       bodyStyles: { fontSize: 10, font: 'Inter' },
     });
 
-    // Agency Totals
     doc.autoTable({
-      head: [['Agency', 'Total Commission', 'Listed', 'Sold', 'Suburbs']],
-      body: agencyTotals.map((row) => [
-        row.agency,
-        formatCurrency(row.totalCommission),
-        row.listedCount.toString(),
-        row.soldCount.toString(),
-        row.suburbs.join(', ') || 'None',
-      ])
-    }, {
+      head: [['Agency', 'Commission Rate', 'Total Commission', 'Listed', 'Sold', 'Suburbs']],
+      body: agencyTotals.map((row) => {
+        const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
+        const commissionRate = properties.length > 0 ? properties[0].commission || 0 : 0;
+        return [
+          row.agency,
+          `${commissionRate}%`,
+          formatCurrency(row.totalCommission),
+          row.listedCount.toString(),
+          row.soldCount.toString(),
+          row.suburbs.join(', ') || 'None',
+        ];
+      }),
       startY: doc.lastAutoTable.finalY + 20,
       theme: 'striped',
       headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], font: 'Inter' },
       bodyStyles: { fontSize: 10, font: 'Inter' },
     });
 
-    // Agent Totals
     doc.autoTable({
-      head: [['Agent', 'Total Commission', 'Properties Listed', 'Properties Sold', 'Our Agent']],
+      head: [['Agent', 'Commission Rate', 'Total Commission', 'Properties Listed', 'Properties Sold', 'Our Agent']],
       body: Object.entries(internalAgentData).map(([name, data]) => [
         name,
+        data.commissionRate ? `${data.commissionRate}%` : 'Agency Default',
         formatCurrency(data.commission),
         data.listed.toString(),
         data.sold.toString(),
         name === ourAgentName && agencyTotals.some((a) => a.agency === ourAgencyName && a.agents.some((ag) => ag.name === name)) ? 'Yes' : 'No',
-      ])
-    }, {
+      ]),
       startY: doc.lastAutoTable.finalY + 20,
       theme: 'striped',
       headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], font: 'Inter' },
@@ -548,7 +779,7 @@ export default function CommissionByAgency() {
     const data = [
       ['Commission Performance Report'],
       [`Generated on: ${new Date().toLocaleString()}`],
-      ['Harcourts Success - Powered by xAI'],
+      ['Harcourts Success'],
       [],
       ['Summary'],
       ['Metric', 'Value'],
@@ -558,22 +789,28 @@ export default function CommissionByAgency() {
       ['Top Agent', `${summary.topAgent.name} (${formatCurrency(summary.topAgent.commission)})`],
       ['Most Active Street', `${summary.topStreet.street} (${summary.topStreet.listedCount} listed, ${formatCurrency(summary.topStreet.commission)})`],
       ['Our Agency', `${ourAgencyName} (${formatCurrency(ourAgency?.totalCommission || 0)}, ${ourAgency?.propertyCount || 0} properties)`],
-      ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission)})` : 'N/A'],
+      ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission || 0)})` : 'N/A'],
       [],
       ['Agency Totals'],
-      ['Agency', 'Total Commission', 'Listed', 'Sold', 'Suburbs'],
-      ...agencyTotals.map((row) => [
-        row.agency,
-        formatCurrency(row.totalCommission),
-        row.listedCount.toString(),
-        row.soldCount.toString(),
-        row.suburbs.join(', ') || 'None',
-      ]),
+      ['Agency', 'Commission Rate', 'Total Commission', 'Listed', 'Sold', 'Suburbs'],
+      ...agencyTotals.map((row) => {
+        const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
+        const commissionRate = properties.length > 0 ? properties[0].commission || 0 : 0;
+        return [
+          row.agency,
+          `${commissionRate}%`,
+          formatCurrency(row.totalCommission),
+          row.listedCount.toString(),
+          row.soldCount.toString(),
+          row.suburbs.join(', ') || 'None',
+        ];
+      }),
       [],
       ['Agent Totals'],
-      ['Agent', 'Total Commission', 'Properties Listed', 'Properties Sold', 'Our Agent'],
+      ['Agent', 'Commission Rate', 'Total Commission', 'Properties Listed', 'Properties Sold', 'Our Agent'],
       ...Object.entries(internalAgentData).map(([name, data]) => [
         name,
+        data.commissionRate ? `${data.commissionRate}%` : 'Agency Default',
         formatCurrency(data.commission),
         data.listed.toString(),
         data.sold.toString(),
@@ -581,14 +818,13 @@ export default function CommissionByAgency() {
       ]),
     ];
 
-    const ws = utils.aoa_to_sheet(data);
+    const ws = utils.array_to_sheet(data);
     const wb = utils.book_new();
     utils.book_append_sheet(wb, ws, 'Commission Report');
     writeFile(wb, 'commission_report.csv');
     toast.success('Commission report exported as CSV');
   };
 
-  // Filter and Search Logic
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
     setCurrentPage(1);
@@ -608,7 +844,7 @@ export default function CommissionByAgency() {
   const filteredAgencyTotals = useMemo(() => {
     let filtered = agencyTotals;
     if (searchQuery) {
-      filtered = filtered.filter((row) => row.agency.toLowerCase().includes(searchQuery.toLowerCase()));
+      filtered = filtered.filter((row) => normalizeAgencyName(row.agency).toLowerCase().includes(searchQuery.toLowerCase()));
     }
     if (statusFilter !== 'all') {
       filtered = filtered.filter((row) => {
@@ -644,7 +880,6 @@ export default function CommissionByAgency() {
     return filtered;
   }, [internalAgentData, selectedAgency, internalProperties]);
 
-  // Loading State
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
@@ -657,7 +892,6 @@ export default function CommissionByAgency() {
     );
   }
 
-  // Error State
   if (fetchError) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -667,12 +901,13 @@ export default function CommissionByAgency() {
             onClick={() => {
               setIsLoading(true);
               setFetchError(null);
-              // Trigger refetch
               const fetchCommissionData = async () => {
                 try {
-                  const { data, error } = await supabase.from('properties').select('*');
-                  if (error) throw error;
-                  setInternalProperties(data as PropertyDetails[]);
+                  const { data: propertiesData, error: propertiesError } = await supabase.from('properties').select('*');
+                  const { data: agentCommissionsData, error: agentCommissionsError } = await supabase.from('agent_commissions').select('*');
+                  if (propertiesError || agentCommissionsError) throw propertiesError || agentCommissionsError;
+                  setInternalProperties(propertiesData as PropertyDetails[]);
+                  setAgentCommissions(agentCommissionsData as AgentCommission[]);
                 } catch (error: any) {
                   setFetchError(error.message);
                 } finally {
@@ -690,7 +925,6 @@ export default function CommissionByAgency() {
     );
   }
 
-  // No Data State
   if (!internalCommissionData || agencyTotals.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -704,9 +938,19 @@ export default function CommissionByAgency() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        <h1 className="text-3xl font-bold text-gray-800">Commission Dashboard</h1>
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-gray-800">Commission Dashboard</h1>
+          <motion.button
+            onClick={() => navigate('/reports')}
+            className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-all"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Commission Management
+          </motion.button>
+        </div>
 
-        {/* Filters */}
         <motion.div
           className="bg-white p-4 rounded-xl shadow-lg flex flex-col sm:flex-row gap-4"
           initial={{ opacity: 0, y: 20 }}
@@ -763,7 +1007,6 @@ export default function CommissionByAgency() {
           </div>
         </motion.div>
 
-        {/* Summary Section */}
         <CollapsibleSection
           title="Performance Summary"
           isOpen={openSections.summary}
@@ -795,7 +1038,6 @@ export default function CommissionByAgency() {
           </div>
         </CollapsibleSection>
 
-        {/* Our Performance Section */}
         <CollapsibleSection
           title="Our Performance (Harcourts Success)"
           isOpen={openSections.ourPerformance}
@@ -822,6 +1064,7 @@ export default function CommissionByAgency() {
                   <p className="text-sm text-gray-600">Our Agent: {ourAgentName}</p>
                   <p className="text-lg font-semibold text-indigo-600">
                     Commission: {formatCurrency(ourAgent.totalCommission)}, Listed: {ourAgent.propertiesListed}, Sold: {ourAgent.propertiesSold}
+                    {ourAgent.commissionRate ? `, Commission Rate: ${ourAgent.commissionRate}%` : ''}
                   </p>
                 </div>
               )}
@@ -841,7 +1084,6 @@ export default function CommissionByAgency() {
           )}
         </CollapsibleSection>
 
-        {/* Agency Comparison Section */}
         <CollapsibleSection
           title="Agency Comparison"
           isOpen={openSections.agencies}
@@ -855,6 +1097,9 @@ export default function CommissionByAgency() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Listed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sold</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Suburbs</th>
+                {isAdmin && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -877,6 +1122,22 @@ export default function CommissionByAgency() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.listedCount}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.soldCount}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">{row.suburbs.join(', ') || 'None'}</td>
+                    {isAdmin && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <motion.button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCommissionEdit({ isOpen: true, agency: row.agency, newCommission: '' });
+                          }}
+                          className="flex items-center px-3 py-1 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 text-sm"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          <Pencil className="w-4 h-4 mr-1" />
+                          Edit Commission
+                        </motion.button>
+                      </td>
+                    )}
                   </motion.tr>
                 ))}
               </AnimatePresence>
@@ -930,7 +1191,6 @@ export default function CommissionByAgency() {
           </div>
         </CollapsibleSection>
 
-        {/* Agent Details Section */}
         {selectedAgency && (
           <CollapsibleSection
             title={`Agents for ${selectedAgency}`}
@@ -949,9 +1209,13 @@ export default function CommissionByAgency() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Commission Rate</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Commission</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Properties Listed</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Properties Sold</th>
+                  {isAdmin && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -963,15 +1227,40 @@ export default function CommissionByAgency() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2, delay: index * 0.05 }}
-                      className={`hover:bg-indigo-50 transition-colors ${agent.name === ourAgentName && selectedAgency === ourAgencyName ? 'bg-indigo-100' : ''}`}
+                      className={`hover:bg-indigo-50 transition-all ${
+                        agent.name === ourAgentName && selectedAgency === ourAgencyName ? 'bg-indigo-100' : ''
+                      }`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 flex items-center">
                         {agent.name}
                         {agent.name === ourAgentName && selectedAgency === ourAgencyName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {agent.commissionRate ? `${agent.commissionRate}%` : 'Agency Default'}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(agent.commission)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{agent.listed}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{agent.sold}</td>
+                      {isAdmin && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <motion.button
+                            onClick={() => {
+                              setAgentCommissionEdit({
+                                isOpen: true,
+                                agency: selectedAgency,
+                                agent: agent.name,
+                                newCommission: agent.commissionRate?.toString() || '',
+                              });
+                            }}
+                            className="flex items-center px-3 py-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                          >
+                            <Pencil className="w-4 h-4 mr-1" />
+                            Assign Commission
+                          </motion.button>
+                        </td>
+                      )}
                     </motion.tr>
                   ))}
                 </AnimatePresence>
@@ -983,7 +1272,6 @@ export default function CommissionByAgency() {
           </CollapsibleSection>
         )}
 
-        {/* Street Insights Section */}
         <CollapsibleSection
           title="Street Insights"
           isOpen={openSections.streets}
@@ -1007,25 +1295,178 @@ export default function CommissionByAgency() {
           </div>
         </CollapsibleSection>
 
-        {/* Export Buttons */}
+        {commissionEdit.isOpen && isAdmin && (
+          <motion.div
+            className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md"
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">Edit Commission for {commissionEdit.agency}</h3>
+                <button
+                  onClick={() => setCommissionEdit({ isOpen: false, agency: null, newCommission: '' })}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateAgencyCommission();
+                }}
+              >
+                <div className="mb-4">
+                  <label htmlFor="commission" className="block text-sm font-medium text-gray-700">
+                    New Commission Rate (%)
+                  </label>
+                  <input
+                    type="number"
+                    id="commission"
+                    value={commissionEdit.newCommission}
+                    onChange={(e) => setCommissionEdit({ ...commissionEdit, newCommission: e.target.value })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                    placeholder="e.g., 2.5"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    required
+                  />
+                  <p className="mt-1 text-sm text-gray-500">Enter a commission rate between 0% and 10%.</p>
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <motion.button
+                    type="button"
+                    onClick={() => setCommissionEdit({ isOpen: false, agency: null, newCommission: '' })}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    Cancel
+                  </motion.button>
+                  <motion.button
+                    type="submit"
+                    disabled={isUpdatingCommission}
+                    className={`px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 ${
+                      isUpdatingCommission ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                    whileHover={{ scale: isUpdatingCommission ? 1 : 1.05 }}
+                    whileTap={{ scale: isUpdatingCommission ? 1 : 0.95 }}
+                  >
+                    {isUpdatingCommission ? 'Saving...' : 'Save'}
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {agentCommissionEdit.isOpen && isAdmin && (
+          <motion.div
+            className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md"
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">
+                  Assign Commission for {agentCommissionEdit.agent} in {agentCommissionEdit.agency}
+                </h3>
+                <button
+                  onClick={() => setAgentCommissionEdit({ isOpen: false, agency: null, agent: null, newCommission: '' })}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateAgentCommission();
+                }}
+              >
+                <div className="mb-4">
+                  <label htmlFor="agent-commission" className="block text-sm font-medium text-gray-700">
+                    New Commission Rate (%)
+                  </label>
+                  <input
+                    type="number"
+                    id="agent-commission"
+                    value={agentCommissionEdit.newCommission}
+                    onChange={(e) => setAgentCommissionEdit({ ...agentCommissionEdit, newCommission: e.target.value })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                    placeholder="e.g., 2.5"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    required
+                  />
+                  <p className="mt-1 text-sm text-gray-500">Enter a commission rate between 0% and 10%.</p>
+                </div>
+                <div className="flex justify-end space-x-2">
+                  <motion.button
+                    type="button"
+                    onClick={() => setAgentCommissionEdit({ isOpen: false, agency: null, agent: null, newCommission: '' })}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    Cancel
+                  </motion.button>
+                  <motion.button
+                    type="submit"
+                    disabled={isUpdatingAgentCommission}
+                    className={`px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 ${
+                      isUpdatingAgentCommission ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                    whileHover={{ scale: isUpdatingAgentCommission ? 1 : 1.05 }}
+                    whileTap={{ scale: isUpdatingAgentCommission ? 1 : 0.95 }}
+                  >
+                    {isUpdatingAgentCommission ? 'Saving...' : 'Save'}
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
         <div className="flex justify-end space-x-4">
           <motion.button
             onClick={exportCommissionPDF}
-            className="flex items-center px-5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-full hover:from-indigo-700 hover:to-indigo-800 transition-all"
+            className="flex items-center px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
             <Download className="w-4 h-4 mr-2" />
-            PDF
+            Download PDF
           </motion.button>
           <motion.button
             onClick={exportCommissionCSV}
-            className="flex items-center px-5 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-full hover:from-green-700 hover:to-green-800 transition-all"
+            className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
             <Download className="w-4 h-4 mr-2" />
-            CSV
+            Download CSV
           </motion.button>
         </div>
       </div>
@@ -1033,4 +1474,4 @@ export default function CommissionByAgency() {
   );
 }
 
-export { CommissionByAgency };
+export default CommissionByAgency;
