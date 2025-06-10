@@ -26,7 +26,7 @@ import { PropertyReportPage  } from './pages/PropertyReportPage';
 import CommissionByAgency from './pages/CommissionByAgency';
 import Comparisons from './pages/Comparisons';
 import AdminCommissionByAgency from './pages/AdminCommissionByAgency';
-import { AdminLogin } from './pages/adminlogin';
+import { AdminLogin } from './pages/Adminlogin';
 import { AdminDashboard } from './pages/AdminDashboard';
 
 // PrivateRoute for general authenticated users
