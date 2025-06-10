@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
-import { Phone, Users, DoorClosed, Link as LinkIcon, CheckCircle, TrendingUp, Edit2, Search, Download, Mic, Building, Bell } from 'lucide-react';
+import { Phone, Users, DoorClosed, Link as LinkIcon, CheckCircle, Edit2, Mic, Building, Bell } from 'lucide-react';
 import * as tf from '@tensorflow/tfjs';
-import { useNavigate } from 'react-router-dom';
-import { Navigation } from './components/Navigation';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 
 type ActivityType = 'phone_call' | 'client_meeting' | 'door_knock' | 'connection';
 
@@ -27,7 +26,7 @@ interface Activity {
   notes?: string;
   tags?: string[];
   property_id?: string;
-  street_name?: string; // New field to store recommended street
+  street_name?: string;
 }
 
 interface FormData {
@@ -35,12 +34,6 @@ interface FormData {
   client_meeting: string;
   door_knock: string;
   connection: string;
-}
-
-interface PerformanceMetrics {
-  weeklyTrend: number;
-  topActivity: ActivityType | null;
-  activityEfficiency: Record<ActivityType, number>;
 }
 
 interface PredictionResult {
@@ -72,6 +65,7 @@ interface MarketingPlan {
 export function AgentReports() {
   const { user, profile } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [formData, setFormData] = useState<FormData>({
@@ -83,44 +77,57 @@ export function AgentReports() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [editNotes, setEditNotes] = useState('');
   const [editTags, setEditTags] = useState<string[]>([]);
   const [editPropertyId, setEditPropertyId] = useState<string | undefined>(undefined);
-  const [editStreetName, setEditStreetName] = useState<string | undefined>(undefined); // New state for street name
-  const [searchQuery, setSearchQuery] = useState('');
+  const [editStreetName, setEditStreetName] = useState<string | undefined>(undefined);
   const [isRecording, setIsRecording] = useState(false);
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [showPrediction, setShowPrediction] = useState(false);
   const [notifications, setNotifications] = useState<string[]>([]);
-  const [marketingPlan, setMarketingPlan] = useState<MarketingPlan | null>(null); // New state for marketing plan
-  const [recommendedStreet, setRecommendedStreet] = useState<string | null>(null); // New state for recommended street
+  const [marketingPlan, setMarketingPlan] = useState<MarketingPlan | null>(null);
+  const [recommendedStreet, setRecommendedStreet] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState<string | null>(null);
+  const [agentName, setAgentName] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('agent_id');
+    if (id) {
+      setAgentId(id);
+      supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', id)
+        .single()
+        .then(({ data, error }) => {
+          if (!error && data) setAgentName(data.name);
+        });
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (user || agentId) {
       Promise.all([fetchMarketingPlan(), fetchActivities(), fetchProperties()]).finally(() => setLoading(false));
       checkRealTimeNotifications();
     }
-  }, [user]);
+  }, [user, agentId]);
 
   const fetchMarketingPlan = async () => {
     try {
       const { data, error } = await supabase
         .from('marketing_plans')
         .select('*')
-        .eq('agent', user?.id)
+        .eq('agent', agentId || user?.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
+      if (error && error.code !== 'PGRST116') throw error;
 
       if (data) {
         setMarketingPlan(data);
-        // Recommend a street from door_knock_streets or phone_call_streets
         const allStreets = [
           ...data.door_knock_streets.map((s) => s.name),
           ...data.phone_call_streets.map((s) => s.name),
@@ -134,6 +141,7 @@ export function AgentReports() {
       }
     } catch (err) {
       console.error('Fetch marketing plan error:', err);
+      toast.error('Failed to fetch marketing plan');
     }
   };
 
@@ -142,13 +150,13 @@ export function AgentReports() {
       const { data, error } = await supabase
         .from('agent_activities')
         .select('*')
-        .eq('agent_id', user?.id)
+        .eq('agent_id', agentId || user?.id)
         .order('activity_date', { ascending: false });
       if (error) throw error;
       setActivities(data || []);
-      calculatePerformanceMetrics(data || []);
     } catch (err) {
       console.error('Fetch activities error:', err);
+      toast.error('Failed to fetch activities');
     }
   };
 
@@ -157,11 +165,12 @@ export function AgentReports() {
       const { data, error } = await supabase
         .from('properties')
         .select('id, name, street_name, property_type, features, city, price')
-        .eq('user_id', user?.id);
+        .eq('user_id', agentId || user?.id);
       if (error) throw error;
       setProperties(data || []);
     } catch (err) {
       console.error('Fetch properties error:', err);
+      toast.error('Failed to fetch properties');
     }
   };
 
@@ -228,6 +237,7 @@ export function AgentReports() {
       };
     } catch (error) {
       console.error('Error analyzing price trend:', error);
+      toast.error('Failed to analyze price trend');
       return {
         recommendation: 'HOLD',
         confidence: 50,
@@ -239,7 +249,10 @@ export function AgentReports() {
 
   const predictProperty = async (propertyId: string) => {
     const property = properties.find((p) => p.id === propertyId);
-    if (!property || !property.city || !property.price) return;
+    if (!property || !property.city || !property.price) {
+      toast.error('Property missing required data');
+      return;
+    }
 
     setSubmitting(true);
     const predictionResult = await analyzePriceTrend(property.city, property.property_type, property.price);
@@ -259,7 +272,7 @@ export function AgentReports() {
         notes: notes.trim(),
         activity_date: new Date().toISOString(),
         tags: [],
-        street_name: activityType === 'door_knock' || activityType === 'phone_call' ? recommendedStreet : undefined, // Include recommended street
+        street_name: activityType === 'door_knock' || activityType === 'phone_call' ? recommendedStreet : undefined,
       }));
 
     if (activitiesToSubmit.length === 0) return;
@@ -275,9 +288,10 @@ export function AgentReports() {
         setFormData({ phone_call: '', client_meeting: '', door_knock: '', connection: '' });
         fetchActivities();
       }, 1500);
+      toast.success('Activities logged successfully');
     } catch (err: any) {
       console.error('Submit activities error:', err);
-      alert(`Failed to log activities: ${err.message}`);
+      toast.error(`Failed to log activities: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
@@ -294,7 +308,7 @@ export function AgentReports() {
           notes: editNotes,
           tags: editTags,
           property_id: editPropertyId,
-          street_name: editStreetName, // Update street name
+          street_name: editStreetName,
         })
         .eq('id', editingActivity.id)
         .eq('agent_id', user.id);
@@ -314,58 +328,13 @@ export function AgentReports() {
         setEditPropertyId(undefined);
         fetchActivities();
       }, 1500);
+      toast.success('Activity updated successfully');
     } catch (err: any) {
       console.error('Edit activity error:', err);
-      alert(`Failed to update activity: ${err.message}`);
+      toast.error(`Failed to update activity: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const calculatePerformanceMetrics = (activities: Activity[]) => {
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-    const recentActivities = activities.filter((a) => new Date(a.activity_date) >= oneWeekAgo);
-    const totalRecent = recentActivities.length;
-    const totalPrevious = activities.filter(
-      (a) =>
-        new Date(a.activity_date) < oneWeekAgo &&
-        new Date(a.activity_date) >= new Date(oneWeekAgo.getTime() - 7 * 24 * 60 * 60 * 1000)
-    ).length;
-
-    const weeklyTrend = totalPrevious > 0 ? ((totalRecent - totalPrevious) / totalPrevious) * 100 : totalRecent > 0 ? 100 : 0;
-
-    const activityCounts = activities.reduce((acc, curr) => {
-      acc[curr.activity_type] = (acc[curr.activity_type] || 0) + 1;
-      return acc;
-    }, {} as Record<ActivityType, number>);
-
-    const topActivity = Object.entries(activityCounts).reduce(
-      (max, [type, count]) => (count > (activityCounts[max] || 0) ? (type as ActivityType) : max),
-      'phone_call' as ActivityType
-    );
-
-    const activityEfficiency = Object.keys(activityCounts).reduce((acc, type) => {
-      const typeActivities = activities.filter((a) => a.activity_type === type);
-      const avgTime =
-        typeActivities.length > 0
-          ? typeActivities.reduce(
-              (sum, a) => sum + new Date().getTime() - new Date(a.activity_date).getTime(),
-              0
-            ) /
-            typeActivities.length /
-            (1000 * 60 * 60)
-          : 0;
-      acc[type as ActivityType] = avgTime > 0 ? activityCounts[type as ActivityType] / avgTime : activityCounts[type as ActivityType];
-      return acc;
-    }, {} as Record<ActivityType, number>);
-
-    setPerformanceMetrics({
-      weeklyTrend,
-      topActivity,
-      activityEfficiency,
-    });
   };
 
   const getSuggestions = (type: ActivityType) => {
@@ -379,7 +348,7 @@ export function AgentReports() {
 
   const startVoiceInput = () => {
     if (!('webkitSpeechRecognition' in window)) {
-      alert('Speech recognition not supported in this browser.');
+      toast.error('Speech recognition not supported in this browser');
       return;
     }
 
@@ -397,6 +366,7 @@ export function AgentReports() {
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error);
       setIsRecording(false);
+      toast.error('Speech recognition error');
     };
 
     recognition.start();
@@ -416,53 +386,6 @@ export function AgentReports() {
     }
   };
 
-  const activityTotals = activities.reduce((acc, curr) => {
-    acc[curr.activity_type] = (acc[curr.activity_type] || 0) + 1;
-    return acc;
-  }, {} as Record<ActivityType, number>);
-
-  const chartData = Object.entries(
-    activities.reduce((acc, curr) => {
-      const date = new Date(curr.activity_date).toLocaleDateString();
-      acc[date] = acc[date] || { date, phone_call: 0, client_meeting: 0, door_knock: 0, connection: 0 };
-      acc[date][curr.activity_type]++;
-      return acc;
-    }, {} as Record<string, { date: string; phone_call: number; client_meeting: number; door_knock: number; connection: number }>)
-  ).map(([, value]) => value);
-
-  const pieData = Object.entries(activityTotals).map(([name, value]) => ({ name, value }));
-
-  const filteredActivities = activities.filter(
-    (activity) => {
-      const property = properties.find((p) => p.id === activity.property_id);
-      return (
-        activity.notes?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        activity.tags?.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        activity.street_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        property?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        property?.street_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        property?.property_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        property?.features?.some((f) => f.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
-  );
-
-  const exportToCSV = () => {
-    const headers = ['ID,Type,Date,Notes,Tags,Street Name,Name,Street Name,Property Type,Features'];
-    const Rows = filteredActivities.map((activity) => {
-      const property = properties.find((p) => p.id === activity.property_id);
-      return `${activity.id},${activity.activity_type},${activity.activity_date},${activity.notes || ''},${activity.tags?.join(';') || ''},${activity.street_name || ''},${property?.name || ''},${property?.street_name || ''},${property?.property_type || ''},${property?.features?.join(';') || ''}`;
-    });
-    const csvContent = [...headers, ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `agent_activities_${new Date().toISOString()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   if (!profile || (profile.role !== 'agent' && profile.role !== 'admin')) {
     return <div className="p-4 text-center text-red-600">Access denied. Agents or Admins only.</div>;
   }
@@ -471,7 +394,7 @@ export function AgentReports() {
     return <div className="p-4 text-center">Loading...</div>;
   }
 
-  if (!marketingPlan) {
+  if (!marketingPlan && profile.role === 'agent') {
     return (
       <div className="max-w-4xl mx-auto p-4 text-center">
         <h1 className="text-3xl font-bold mb-6">Agent Reports</h1>
@@ -497,11 +420,11 @@ export function AgentReports() {
     { type: 'connection', label: 'Connections', icon: <LinkIcon />, color: 'bg-orange-500' },
   ] as const;
 
-  const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
-
   return (
     <div className="max-w-4xl mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-6">Agent Reports</h1>
+      <h1 className="text-3xl font-bold mb-6">
+        Agent Reports {agentId && agentName ? `for ${agentName}` : ''}
+      </h1>
 
       {notifications.length > 0 && (
         <div className="bg-yellow-100 p-4 rounded-lg mb-4 flex items-center">
@@ -513,72 +436,48 @@ export function AgentReports() {
       {recommendedStreet && (
         <div className="bg-blue-100 p-4 rounded-lg mb-4 flex items-center">
           <p className="text-blue-600">
-            Recommended Street: <strong>{recommendedStreet}</strong> (Suburb: {marketingPlan.suburb})
+            Recommended Street: <strong>{recommendedStreet}</strong> (Suburb: {marketingPlan?.suburb || 'N/A'})
           </p>
         </div>
       )}
 
-      {performanceMetrics && (
-        <div className="bg-white p-6 rounded-lg shadow-md mb-8">
-          <h2 className="text-2xl font-semibold mb-4 flex items-center">
-            <TrendingUp className="mr-2" /> Performance Overview
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 bg-gray-50 rounded">
-              <p className="text-lg font-medium">Weekly Trend</p>
-              <p className={`text-xl ${performanceMetrics.weeklyTrend >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {performanceMetrics.weeklyTrend.toFixed(1)}%
-              </p>
+      {profile.role === 'agent' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 relative">
+          {sections.map((section) => (
+            <div key={section.type} className="bg-white p-4 rounded-lg shadow-md">
+              <div className="flex items-center mb-3">
+                <div className={`${section.color} p-2 rounded-full text-white mr-3`}>{section.icon}</div>
+                <h2 className="text-lg font-semibold">{section.label}</h2>
+              </div>
+              <textarea
+                value={formData[section.type]}
+                onChange={(e) => setFormData({ ...formData, [section.type]: e.target.value })}
+                placeholder={
+                  section.type === 'door_knock' || section.type === 'phone_call'
+                    ? `Log ${section.label.toLowerCase()} for ${recommendedStreet || 'a street'}...`
+                    : `Log ${section.label.toLowerCase()}...`
+                }
+                className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 resize-none"
+                rows={2}
+              />
             </div>
-            <div className="p-4 bg-gray-50 rounded">
-              <p className="text-lg font-medium">Top Activity</p>
-              <p className="text-xl capitalize">{performanceMetrics.topActivity?.replace('_', ' ')}</p>
+          ))}
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !Object.values(formData).some((notes) => notes.trim())}
+            className="md:col-span-2 mt-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
+          >
+            {submitting ? 'Logging...' : 'Log All Activities'}
+          </button>
+          {success && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 rounded-lg">
+              <CheckCircle className="w-12 h-12 text-green-500 animate-bounce" />
             </div>
-            <div className="p-4 bg-gray-50 rounded">
-              <p className="text-lg font-medium">Efficiency Score</p>
-              <p className="text-xl">
-                {Object.values(performanceMetrics.activityEfficiency).reduce((sum, val) => sum + val, 0).toFixed(2)}
-              </p>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 relative">
-        {sections.map((section) => (
-          <div key={section.type} className="bg-white p-4 rounded-lg shadow-md">
-            <div className="flex items-center mb-3">
-              <div className={`${section.color} p-2 rounded-full text-white mr-3`}>{section.icon}</div>
-              <h2 className="text-lg font-semibold">{section.label}</h2>
-            </div>
-            <textarea
-              value={formData[section.type]}
-              onChange={(e) => setFormData({ ...formData, [section.type]: e.target.value })}
-              placeholder={
-                section.type === 'door_knock' || section.type === 'phone_call'
-                  ? `Log ${section.label.toLowerCase()} for ${recommendedStreet || 'a street'}...`
-                  : `Log ${section.label.toLowerCase()}...`
-              }
-              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 resize-none"
-              rows={2}
-            />
-          </div>
-        ))}
-        <button
-          onClick={handleSubmit}
-          disabled={submitting || !Object.values(formData).some((notes) => notes.trim())}
-          className="md:col-span-2 mt-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
-        >
-          {submitting ? 'Logging...' : 'Log All Activities'}
-        </button>
-        {success && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 rounded-lg">
-            <CheckCircle className="w-12 h-12 text-green-500 animate-bounce" />
-          </div>
-        )}
-      </div>
-
-      {editingActivity && (
+      {editingActivity && profile.role === 'agent' && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-lg">
             <h2 className="text-xl font-semibold mb-4 flex items-center">
@@ -722,15 +621,6 @@ export function AgentReports() {
               </div>
             </div>
 
-            {performanceMetrics && (
-              <div className="mb-4 p-3 bg-gray-50 rounded">
-                <p className="text-sm font-medium">Impact Preview</p>
-                <p className="text-sm">
-                  Efficiency Score Change: {(performanceMetrics.activityEfficiency[editingActivity.activity_type] * 1.1).toFixed(2)} (est.)
-                </p>
-              </div>
-            )}
-
             <div className="flex justify-end gap-4">
               <button onClick={() => setEditingActivity(null)} className="py-2 px-4 bg-gray-300 rounded hover:bg-gray-400">
                 Cancel
@@ -785,39 +675,11 @@ export function AgentReports() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {sections.map((section) => (
-          <div key={section.type} className={`${section.color.replace('500', '100')} p-4 rounded-lg text-center`}>
-            <h3 className="text-lg font-medium">{section.label}</h3>
-            <p className="text-2xl font-bold">{activityTotals[section.type] || 0}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mb-8 flex items-center gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by notes, tags, street name, name, street name, property type, or features..."
-            className="w-full pl-10 p-2 border rounded focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <button
-          onClick={exportToCSV}
-          className="py-2 px-4 bg-green-500 text-white rounded hover:bg-green-600 flex items-center"
-        >
-          <Download className="w-5 h-5 mr-2" /> Export CSV
-        </button>
-      </div>
-
       <div className="mb-8">
         <h2 className="text-2xl font-semibold mb-4">Recent Activities</h2>
-        {filteredActivities.length > 0 ? (
+        {activities.length > 0 ? (
           <div className="space-y-4">
-            {filteredActivities.slice(0, 10).map((activity) => {
+            {activities.slice(0, 10).map((activity) => {
               const linkedProperty = properties.find((p) => p.id === activity.property_id);
               return (
                 <div key={activity.id} className="bg-white p-4 rounded-lg shadow-md flex justify-between items-center">
@@ -839,67 +701,28 @@ export function AgentReports() {
                       {activity.tags?.length ? ` | Tags: ${activity.tags.join(', ')}` : ''}
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setEditingActivity(activity);
-                      setEditNotes(activity.notes || '');
-                      setEditTags(activity.tags || []);
-                      setEditPropertyId(activity.property_id);
-                      setEditStreetName(activity.street_name);
-                    }}
-                    className="p-2 text-blue-500 hover:text-blue-700"
-                  >
-                    <Edit2 className="w-5 h-5" />
-                  </button>
+                  {profile.role === 'agent' && (
+                    <button
+                      onClick={() => {
+                        setEditingActivity(activity);
+                        setEditNotes(activity.notes || '');
+                        setEditTags(activity.tags || []);
+                        setEditPropertyId(activity.property_id);
+                        setEditStreetName(activity.street_name);
+                      }}
+                      className="p-2 text-blue-500 hover:text-blue-700"
+                    >
+                      <Edit2 className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
               );
             })}
           </div>
         ) : (
-          <p className="text-center">No activities match your search.</p>
+          <p className="text-center">No activities found.</p>
         )}
       </div>
-
-      <h2 className="text-2xl font-semibold mb-4">Daily Activity</h2>
-      {chartData.length > 0 ? (
-        <BarChart width={600} height={300} data={chartData} className="mx-auto">
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="date" />
-          <YAxis />
-          <Tooltip />
-          <Legend />
-          <Bar dataKey="phone_call" fill="#8884d8" name="Phone Calls" />
-          <Bar dataKey="client_meeting" fill="#82ca9d" name="Client Meetings" />
-          <Bar dataKey="door_knock" fill="#ffc658" name="Door Knocks" />
-          <Bar dataKey="connection" fill="#ff7300" name="Connections" />
-        </BarChart>
-      ) : (
-        <p className="text-center">No activities logged yet.</p>
-      )}
-
-      {pieData.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-2xl font-semibold mb-4">Activity Distribution</h2>
-          <PieChart width={400} height={400} className="mx-auto">
-            <Pie
-              data={pieData}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-              outerRadius={150}
-              fill="#8884d8"
-              dataKey="value"
-            >
-              {pieData.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip />
-            <Legend />
-          </PieChart>
-        </div>
-      )}
     </div>
   );
 }

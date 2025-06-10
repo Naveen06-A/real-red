@@ -39,21 +39,27 @@ Object.defineProperty(exports, "__esModule", { value: true });
 var express_1 = require("express");
 var cors_1 = require("cors");
 var supabase_server_1 = require("./supabase-server");
+var sgMail = require('@sendgrid/mail');
 require("dotenv/config");
+
 var app = (0, express_1.default)();
 app.use((0, cors_1.default)({ origin: 'http://localhost:5173' }));
 app.use(express_1.default.json());
+
+// Set SendGrid API key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
 // Create agent endpoint
 app.post('/api/create-agent', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var _a, email, permissions, tempPassword, uniqueAgentId, _b, authData, authError, profileError, error_1;
+    var _a, email, permissions, name, phone, tempPassword, uniqueAgentId, _b, authData, authError, profileError, error_1;
     var _c;
     return __generator(this, function (_d) {
         switch (_d.label) {
             case 0:
                 _d.trys.push([0, 3, , 4]);
-                _a = req.body, email = _a.email, permissions = _a.permissions;
-                if (!email || !permissions) {
-                    res.status(400).json({ error: 'Email and permissions are required' });
+                _a = req.body, email = _a.email, permissions = _a.permissions, name = _a.name, phone = _a.phone;
+                if (!email || !permissions || !name) {
+                    res.status(400).json({ error: 'Email, name, and permissions are required' });
                     return [2 /*return*/];
                 }
                 tempPassword = Math.random().toString(36).slice(-8);
@@ -62,6 +68,7 @@ app.post('/api/create-agent', function (req, res) { return __awaiter(void 0, voi
                         email: email,
                         password: tempPassword,
                         email_confirm: true,
+                        user_metadata: { name, phone },
                     })];
             case 1:
                 _b = _d.sent(), authData = _b.data, authError = _b.error;
@@ -74,13 +81,15 @@ app.post('/api/create-agent', function (req, res) { return __awaiter(void 0, voi
                         email: email,
                         role: 'agent',
                         permissions: permissions,
+                        name: name,
+                        phone: phone,
                     })];
             case 2:
                 profileError = (_d.sent()).error;
                 if (profileError) {
                     throw new Error("Profile error: ".concat(profileError.message));
                 }
-                res.status(201).json({ agent_id: uniqueAgentId, email: email, message: 'Agent created successfully' });
+                res.status(201).json({ agent_id: uniqueAgentId, email: email, tempPassword: tempPassword, name: name, message: 'Agent created successfully' });
                 return [3 /*break*/, 4];
             case 3:
                 error_1 = _d.sent();
@@ -91,6 +100,41 @@ app.post('/api/create-agent', function (req, res) { return __awaiter(void 0, voi
         }
     });
 }); });
+
+// Send agent credentials email
+app.post('/api/send-agent-credentials', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
+    var _a, email, password, name, subject, message, msg, error_2;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0:
+                _b.trys.push([0, 2, , 3]);
+                _a = req.body, email = _a.email, password = _a.password, name = _a.name, subject = _a.subject, message = _a.message;
+                if (!email || !password || !name || !subject || !message) {
+                    res.status(400).json({ error: 'Email, password, name, subject, and message are required' });
+                    return [2 /*return*/];
+                }
+                msg = {
+                    to: email,
+                    from: process.env.SENDGRID_FROM_EMAIL || 'your-email@yourdomain.com',
+                    subject: subject,
+                    text: message,
+                    html: message.replace(/\n/g, '<br>'),
+                };
+                return [4 /*yield*/, sgMail.send(msg)];
+            case 1:
+                _b.sent();
+                res.status(200).json({ message: 'Email sent successfully' });
+                return [3 /*break*/, 3];
+            case 2:
+                error_2 = _b.sent();
+                console.error('Error sending email:', error_2);
+                res.status(500).json({ error: error_2.message || 'Failed to send email' });
+                return [3 /*break*/, 3];
+            case 3: return [2 /*return*/];
+        }
+    });
+}); });
+
 // Fetch agents endpoint
 app.get('/api/agents', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
     var _a, data, error, error_2;
@@ -100,7 +144,7 @@ app.get('/api/agents', function (req, res) { return __awaiter(void 0, void 0, vo
                 _b.trys.push([0, 2, , 3]);
                 return [4 /*yield*/, supabase_server_1.supabaseServer
                         .from('profiles')
-                        .select('id, agent_id, email, role, permissions')
+                        .select('id, agent_id, email, role, permissions, name, phone')
                         .eq('role', 'agent')];
             case 1:
                 _a = _b.sent(), data = _a.data, error = _a.error;
@@ -117,6 +161,7 @@ app.get('/api/agents', function (req, res) { return __awaiter(void 0, void 0, vo
         }
     });
 }); });
+
 // Update agent permissions endpoint
 app.post('/api/update-agent-permissions', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
     var _a, agentId, permissions, error, error_3;
@@ -148,5 +193,6 @@ app.post('/api/update-agent-permissions', function (req, res) { return __awaiter
         }
     });
 }); });
+
 var PORT = process.env.PORT || 3001;
 app.listen(PORT, function () { return console.log("Server running on port ".concat(PORT)); });

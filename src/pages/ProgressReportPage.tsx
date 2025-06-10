@@ -78,6 +78,14 @@ const calculatePercentage = (completed: number, target: number): number => {
   if (target === 0) return completed > 0 ? 100 : 0;
   return Math.min(Math.round((completed / target) * 100), 100);
 };
+const formatDate = (date: string) => {
+  if (!date) return 'Not specified';
+  return new Date(date).toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
 // Add date range validation
 const isDateRangeValid = (plan: MarketingPlan) => {
   if (!plan.start_date || !plan.end_date) return false;
@@ -898,6 +906,7 @@ export function ProgressReportPage() {
       { label: 'Face-to-Face Appraisals Target', data: planProgresses.map((p) => p.faceToFaceAppraisals.target), backgroundColor: '#FCA5A5' },
     ],
   }), [planProgresses]);
+  
 
   // Effect for initialization
   useEffect(() => {

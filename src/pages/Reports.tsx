@@ -26,6 +26,7 @@ import { AgentPropertyMap } from './AgentPropertyMap';
 import { EditModal } from './EditModal';
 import { PropertyDetails, PropertyMetrics, Filters } from './Reports';
 import { PropertyReportPage } from './PropertyReportPage';
+import { CommissionByAgency } from './CommissionByAgency';
 import {
   formatCurrency,
   normalizeSuburb,
@@ -510,28 +511,7 @@ export function Reports() {
                   aria-label="View property report"
                   title="View detailed property report"
                 >
-                  <motion.svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      whileHover={{ rotate: 10 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                        d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                        d="M9 16h6m-3-3v6"
-                      />
-                    </motion.svg>
-                    <span>Property Report</span>
+                  Property Report
                 </motion.button>
                 <motion.button
                   onClick={() => {
@@ -545,28 +525,7 @@ export function Reports() {
                   title="View detailed commission reports"
                   disabled={!propertyMetrics}
                 >
-                  <motion.svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    whileHover={{ scale: 1.1 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 8c-1.657 0-3 .672-3 1.5S10.343 11 12 11s3-.672 3-1.5S13.657 8 12 8z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M5 12h14m-7-7v14m7-10V5a2 2 0 00-2-2H7a2 2 0 00-2 2v4"
-                    />
-                  </motion.svg>
-                  <span>Commissions</span>
+                  Commissions
                 </motion.button>
                 <motion.button
                   onClick={() => {
@@ -580,22 +539,7 @@ export function Reports() {
                   title="View performance comparisons"
                   disabled={!propertyMetrics}
                 >
-                <motion.svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    whileHover={{ rotate: -10 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M8 7h12m0 0l-4-4m4 4l-4 4m-12 4h12m0 0l-4-4m4 4l-4 4"
-                    />
-                  </motion.svg>
-                  <span>Comparisons</span>
+                  Comparisons
                 </motion.button>
               </div>
             </motion.div>

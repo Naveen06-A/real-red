@@ -1,4 +1,3 @@
-
 import { AlertTriangle, ArrowRight, Building, Calendar, Droplet, Flame, Loader2, MapPin, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -15,7 +14,7 @@ interface UserProfile {
   name: string;
   phone: string;
   email: string;
-  role: 'user' | 'agent' | 'admin';
+  role: 'user' | 'agent';
 }
 
 interface SameStreetSale {
@@ -131,6 +130,7 @@ export function PropertyForm() {
     sold_date: '',
   });
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [commissionEstimate, setCommissionEstimate] = useState<number>(0);
   const [newFeature, setNewFeature] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -649,117 +649,200 @@ export function PropertyForm() {
     return true;
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-  if (!validateForm() || !user) return;
 
+
+const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  if (!validateForm() || !user) {
+    setError('Please complete all required fields or log in');
+    setToast({ message: 'Please complete all required fields or log in', type: 'error', visible: true });
+    setTimeout(() => setToast({ message: '', type: 'success', visible: false }), 5000);
+    return;
+  }
+
+  // Validate user.id format (UUID)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(user.id)) {
+    const errorMessage = 'Invalid user ID format';
+    setError(errorMessage);
+    setToast({ message: errorMessage, type: 'error', visible: true });
+    setTimeout(() => setToast({ message: '', type: 'success', visible: false }), 5000);
+    return;
+  }
+
+  setIsSubmitting(true);
+  setError(null);
   try {
-    const propertyData: any = {
-      street_number: formData.street_number,
-      street_name: formData.street_name,
-      bedrooms: parseInt(formData.bedrooms) || 0,
-      bathrooms: parseInt(formData.bathrooms) || 0,
-      car_garage: parseInt(formData.car_garage) || 0,
-      sqm: parseFloat(formData.sqm.replace(/,/g, '')) || 0,
-      landsize: parseFloat(formData.landsize.replace(/,/g, '')) || 0,
-      suburb: formData.suburb,
-      agent_name: formData.agent_name,
-      agency_name: formData.agency_name,
-      postcode: formData.postcode,
-      property_type: formData.property_type,
-      price: parseFloat(formData.price.replace(/,/g, '')),
-      offers_over: formData.offers_over,
-      expected_price: parseFloat(formData.expected_price.replace(/,/g, '')),
-      commission: parseFloat(formData.commission),
-      features: formData.features,
-      user_id: user.id,
-      created_at: new Date().toISOString(),
-      listed_date: formData.listed_date || null,
-      sold_date: formData.sold_date || null,
-      category: 'Listing',
-      sale_type: formData.sale_type,
-      flood_risk: formData.flood_risk,
-      bushfire_risk: formData.bushfire_risk,
-      contract_status: formData.contract_status,
-      same_street_sales: formData.same_street_sales,
-      days_on_market: formData.days_on_market,
-      past_records: formData.past_records?.map((record) => ({
+    const propertyData = {
+      p_street_number: formData.street_number || null,
+      p_street_name: formData.street_name || null,
+      p_bedrooms: parseInt(formData.bedrooms) || 0,
+      p_bathrooms: parseInt(formData.bathrooms) || 0,
+      p_car_garage: parseInt(formData.car_garage) || 0,
+      p_sqm: parseFloat(formData.sqm.replace(/,/g, '')) || 0,
+      p_landsize: parseFloat(formData.landsize.replace(/,/g, '')) || 0,
+      p_suburb: formData.suburb || null,
+      p_agent_name: formData.agent_name || null,
+      p_agency_name: formData.agency_name || null,
+      p_postcode: formData.postcode || null,
+      p_property_type: formData.property_type || null,
+      p_price: parseFloat(formData.price.replace(/,/g, '')) || 0,
+      p_offers_over: formData.offers_over || false,
+      p_expected_price: parseFloat(formData.expected_price.replace(/,/g, '')) || 0,
+      p_commission: parseFloat(formData.commission) || 0,
+      p_features: formData.features || [],
+      p_user_id: user.id,
+      p_created_at: new Date().toISOString(),
+      p_listed_date: formData.listed_date || null,
+      p_sold_date: formData.sold_date || null,
+      p_category: 'Listing',
+      p_sale_type: formData.sale_type || null,
+      p_flood_risk: formData.flood_risk || null,
+      p_bushfire_risk: formData.bushfire_risk || null,
+      p_flood_notes: formData.flood_notes || null,
+      p_bushfire_notes: formData.bushfire_notes || null,
+      p_contract_status: formData.contract_status || null,
+      p_same_street_sales: formData.same_street_sales || [],
+      p_days_on_market: formData.days_on_market || 0,
+      p_past_records: formData.past_records?.map((record) => ({
         ...record,
-        price: parseFloat(record.price.replace(/,/g, '')),
+        price: parseFloat(record.price.replace(/,/g, '')) || 0,
         sqm: parseFloat(record.sqm?.replace(/,/g, '') || '0'),
         landsize: parseFloat(record.landsize?.replace(/,/g, '') || '0'),
-      })),
+      })) || [],
     };
 
-    if (formData.flood_notes) propertyData.flood_notes = formData.flood_notes;
-    if (formData.bushfire_notes) propertyData.bushfire_notes = formData.bushfire_notes;
+    console.log('Calling RPC with data:', propertyData);
 
-    const { data, error } = await supabase
-      .from('properties')
-      .insert([propertyData])
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('insert_property', propertyData);
 
-    if (error) throw error;
-    if (!data) throw new Error('No data returned from the server');
+    if (error) {
+      console.error('RPC error:', error);
+      throw new Error(`Failed to save property via RPC: ${error.message || 'Unknown error'}`);
+    }
 
+    console.log('RPC result:', data);
+
+    if (!data || data.length === 0) {
+      console.error('No data returned from RPC:', data);
+      throw new Error('No property data returned from RPC');
+    }
+
+    if (data.length > 1) {
+      console.error('Multiple rows returned from RPC:', data);
+      throw new Error('Multiple rows returned by RPC. Check database triggers or function logic.');
+    }
+
+    const insertedProperty = data[0];
+    if (!insertedProperty.id) {
+      console.error('No valid ID in returned data:', insertedProperty);
+      throw new Error('No valid property ID returned');
+    }
+
+    console.log('Property inserted via RPC:', insertedProperty);
     setSubmitted(true);
-    setToast({ message: 'Property listed successfully!', visible: true });
+    setToast({ message: 'Property listed successfully!', type: 'success', visible: true });
     setTimeout(() => {
-      setToast({ message: '', visible: false });
-      if (profile?.role === 'admin') {
-        navigate('/admin-dashboard');
-      } else if (profile?.role === 'agent') {
+      setToast({ message: '', type: 'success', visible: false });
+      if (profile?.role === 'agent') {
         navigate('/agent-dashboard');
-      } else if (profile?.role === 'user') {
-        navigate('/');
+        } else if (profile?.role === 'admin') {
+      navigate('/admin-dashboard');
       } else {
-        navigate(`/property/${data.id}`, { state: { property: data } });
+        navigate(`/property-detail/${insertedProperty.id}`, { state: { property: insertedProperty } });
       }
-    }, 2000);
+    }, 4000);
   } catch (err: any) {
-    setError(`Failed to submit property: ${err.message || 'Unknown error'}`);
-    console.error(err);
+    console.error('Submission error:', err);
+    const errorMessage = `Failed to submit property: ${err.message || 'Unknown error'}`;
+    setError(errorMessage);
+    setToast({ message: errorMessage, type: 'error', visible: true });
     setTimeout(() => {
-      navigate(profile?.role === 'admin' ? '/admin-dashboard' : '/agent-dashboard');
-    }, 2000);
+      setToast({ message: '', type: 'success', visible: false });
+    }, 5000);
+  } finally {
+    setIsSubmitting(false);
   }
 };
 
-if (loading) {
-  return (
-    <div className="max-w-2xl mx-auto p-4 text-center">
-      <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
-      <p className="text-gray-600 mt-2">Loading authentication...</p>
-    </div>
-  );
-}
-
-if (!user || !profile || (profile.role !== 'agent' && profile.role !== 'admin')) {
-  setTimeout(() => {
-    navigate(profile?.role === 'admin' ? '/admin-dashboard' : '/agent-dashboard');
-  }, 2000);
-  return (
-    <div className="max-w-2xl mx-auto p-4 text-center">
-      <h2 className="text-2xl font-bold text-red-600">Access Denied</h2>
-      <p className="text-gray-600 mt-2">Only agents or admins can add properties. Redirecting to dashboard...</p>
-      <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mt-4" />
-    </div>
-  );
-}
-
-  if (submitted) {
+  if (loading) {
     return (
-      <div className="max-w-2xl mx-auto text-center">
-        <div className="bg-white p-8 rounded-lg shadow-md">
-          <Building className="w-12 h-12 text-green-600 mx-auto mb-4 animate-bounce" />
-          <h2 className="text-2xl font-bold mb-4">Property Submitted Successfully!</h2>
-          <p className="text-gray-600">Redirecting to Property Details...</p>
-          <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mt-4" />
-        </div>
+      <div className="max-w-2xl mx-auto p-4 text-center">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+        <p className="text-gray-600 mt-2">Loading authentication...</p>
       </div>
     );
   }
+
+  if (!user || !profile || !['agent', 'admin'].includes(profile.role)) {
+    console.warn('Unauthorized access detected, user:', user, 'profile:', profile);
+    setTimeout(() => {
+      setToast({ message: '', type: 'success', visible: false });
+    if (profile?.role === 'agent') {
+      navigate('/agent-dashboard');
+    } else if (profile?.role === 'admin') {
+      navigate('/admin-dashboard');
+    } else {
+      navigate(`/property-detail/${insertedProperty.id}`, { state: { property: insertedProperty } });
+    }
+  }, 4000);
+    return (
+      <div className="max-w-2xl mx-auto p-4 text-center">
+        <h2 className="text-2xl font-bold text-red-600">Access Denied</h2>
+        <p className="text-gray-600 mt-2">Only agents can add properties. Redirecting to login...</p>
+        <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mt-4" />
+      </div>
+    );
+  }
+  // Toast rendering
+{toast.visible && (
+  <div
+    className={`fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg animate-fade-in ${
+      toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+    }`}
+  >
+    {toast.message}
+    <button
+      type="button"
+      onClick={() => setToast({ message: '', type: 'success', visible: false })}
+      className="ml-2 text-white hover:text-gray-200"
+    >
+      <X className="w-4 h-4" />
+    </button>
+  </div>
+)}
+
+  if (submitted) {
+  return (
+    <div className="max-w-2xl mx-auto text-center py-12">
+      <div className="bg-white p-8 rounded-lg shadow-md border-2 border-green-500">
+        <Building className="w-16 h-16 text-green-600 mx-auto mb-4 animate-pulse" />
+        <h2 className="text-3xl font-bold text-green-700 mb-4">Property Listed Successfully!</h2>
+        <p className="text-gray-600 mb-6">Your property has been saved and will be available shortly.</p>
+        <p className="text-gray-500 mb-4">
+          Redirecting to {profile?.role === 'agent' ? 'Agent Dashboard' : profile?.role === 'admin' ? 'Admin Dashboard' : 'Property Details'}...
+        </p>
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+        <button
+          type="button"
+          onClick={() => {
+            setToast({ message: '', type: 'success', visible: false });
+            if (profile?.role === 'agent') {
+              navigate('/agent-dashboard');
+              } else if (profile?.role === 'admin') {
+              navigate('/admin-dashboard');
+            } else {
+              navigate('/property-detail');
+            }
+          }}
+          className="mt-6 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+        >
+          Go to {profile?.role === 'agent' ? 'Dashboard' : profile?.role === 'admin' ? 'Admin Dashboard' : 'Property Details'} Now
+        </button>
+      </div>
+    </div>
+  );
+}
 
   const getRiskColor = (risk: string) => {
     switch (risk) {
@@ -1774,7 +1857,7 @@ if (!user || !profile || (profile.role !== 'agent' && profile.role !== 'admin'))
                   className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter commission %"
                   required
-                />
+              />
                 <span className="text-sm text-gray-500 absolute right-2 top-2">
                   Est:{' '}
                   {new Intl.NumberFormat('en-AU', {

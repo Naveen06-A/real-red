@@ -3,16 +3,83 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { Lock, Mail, AlertCircle, CheckCircle, LogIn, Loader2 } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
 
 export function AgentLogin() {
   const [formData, setFormData] = useState({ email: '', password: '' });
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, profile, initializeAuth, fetchProfile, loading: authLoading } = useAuthStore();
   const successMessage = location.state?.message;
+
+  // Particle animation setup
+  useEffect(() => {
+    const canvas = document.getElementById('particleCanvas');
+    const ctx = canvas?.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles = [];
+    const particleCount = 60;
+
+    class Particle {
+      constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.size = Math.random() * 2.5 + 1;
+        this.speedX = Math.random() * 0.4 - 0.2;
+        this.speedY = Math.random() * 0.4 - 0.2;
+      }
+      update() {
+        this.x += this.speedX;
+        this.y += this.speedY;
+        if (this.size > 0.2) this.size -= 0.008;
+        if (this.x < 0 || this.x > canvas.width) this.speedX *= -1;
+        if (this.y < 0 || this.y > canvas.height) this.speedY *= -1;
+      }
+      draw() {
+        ctx.fillStyle = 'rgba(125, 211, 252, 0.7)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function init() {
+      for (let i = 0; i < particleCount; i++) {
+        particles.push(new Particle());
+      }
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < particles.length; i++) {
+        particles[i].update();
+        particles[i].draw();
+        if (particles[i].size <= 0.2) {
+          particles.splice(i, 1);
+          i--;
+          particles.push(new Particle());
+        }
+      }
+      requestAnimationFrame(animate);
+    }
+
+    init();
+    animate();
+
+    const handleResize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Redirect if already logged in as agent
   useEffect(() => {
@@ -22,25 +89,23 @@ export function AgentLogin() {
     }
   }, [user, profile, navigate]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     setError(null);
     setResetMessage(null);
   };
 
-  const handleAgentLogin = async (e: React.FormEvent) => {
+  const handleAgentLogin = async (e) => {
     e.preventDefault();
     setError(null);
     setResetMessage(null);
     setLoading(true);
 
     try {
-      // Test Supabase connectivity
       const { data: testQuery, error: testError } = await supabase.from('profiles').select('count').limit(1);
       console.log('Supabase connectivity test:', { testQuery, testError });
       if (testError) throw new Error(`Supabase connectivity error: ${testError.message}`);
 
-      // Sign in with Supabase
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
@@ -50,12 +115,10 @@ export function AgentLogin() {
       if (signInError) throw new Error(signInError.message || 'Invalid email or password.');
       if (!data.user) throw new Error('No user data returned from login.');
 
-      // Initialize auth and fetch profile
       console.log('Initializing auth for user:', data.user.id);
       await initializeAuth();
       let currentProfile = useAuthStore.getState().profile;
 
-      // Direct fetch if profile is null
       if (!currentProfile) {
         console.log('Profile not found after initializeAuth, attempting direct fetch...');
         await fetchProfile();
@@ -73,6 +136,7 @@ export function AgentLogin() {
 
       if (currentProfile.role === 'agent') {
         console.log('Role verified as agent, navigating to dashboard');
+        toast.success('Login successful! Redirecting to dashboard...');
         navigate('/agent-dashboard');
       } else {
         console.log('Non-agent role detected:', currentProfile.role);
@@ -80,7 +144,7 @@ export function AgentLogin() {
           state: { message: 'Access denied: This page is for agents only. Please use the standard login.' },
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Login Error:', err);
       let errorMessage = err.message || 'Login failed. Please check your credentials and try again.';
       if (err.message.includes('permission denied')) {
@@ -91,6 +155,7 @@ export function AgentLogin() {
         errorMessage = 'Database schema error: The profiles table columns may be misconfigured. Verify the schema and query.';
       }
       setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -99,6 +164,7 @@ export function AgentLogin() {
   const handleForgotPassword = async () => {
     if (!formData.email) {
       setError('Please enter your email to reset your password.');
+      toast.error('Email required for password reset.');
       return;
     }
 
@@ -113,62 +179,76 @@ export function AgentLogin() {
 
       if (error) throw new Error(error.message || 'Failed to send password reset email.');
       setResetMessage('Password reset email sent! Check your inbox.');
-    } catch (err: any) {
+      toast.success('Password reset email sent!');
+    } catch (err) {
       console.error('Forgot Password Error:', err);
       setError(err.message || 'Failed to send password reset email.');
+      toast.error(err.message || 'Failed to send password reset email.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Show loading state while checking auth
   if (authLoading) {
     return (
-      <div className="flex justify-center items-center min-h-[600px]">
-        <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-        <span className="ml-2">Loading...</span>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-100 via-cyan-100 to-blue-200">
+        <div className="flex items-center space-x-3">
+          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+          <span className="text-sky-800 text-lg font-medium">Authenticating...</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto mt-12">
-      <div className="bg-white p-8 rounded-lg shadow-lg min-h-[600px]">
-        <div className="flex items-center justify-center mb-6">
-          <LogIn className="w-8 h-8 text-blue-600 mr-2" />
-          <h1 className="text-2xl font-bold text-gray-900">Agent Login</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-100 via-cyan-100 to-blue-200 relative overflow-hidden">
+      {/* Particle Canvas */}
+      <canvas
+        id="particleCanvas"
+        className="absolute inset-0 pointer-events-none"
+      />
+
+      <Toaster position="top-center" toastOptions={{ duration: 3000 }} />
+
+      {/* Glassmorphic Card */}
+      <div className="relative bg-white/15 backdrop-blur-xl rounded-3xl shadow-2xl p-10 w-full max-w-lg border border-cyan-200/30 animate-slideIn">
+        <div className="flex items-center justify-center mb-8">
+          <LogIn className="w-10 h-10 text-cyan-400 mr-3 drop-shadow-md" />
+          <h1 className="text-3xl font-extrabold text-sky-900 drop-shadow-md">Agent Portal</h1>
         </div>
 
         {successMessage && (
-          <div className="bg-green-50 text-green-600 p-4 rounded mb-4 flex items-center space-x-2">
-            <CheckCircle className="w-5 h-5" />
-            <p>{successMessage}</p>
+          <div className="mb-6 p-4 bg-green-100/80 text-green-800 rounded-xl flex items-center space-x-3 animate-pulseSuccess">
+            <CheckCircle className="w-6 h-6" />
+            <p className="text-sm">{successMessage}</p>
           </div>
         )}
         {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded mb-4 flex items-start space-x-2">
-            <AlertCircle className="w-5 h-5 mt-0.5" />
-            <p>{error}</p>
+          <div className="mb-6 p-4 bg-red-100/80 text-red-800 rounded-xl flex items-start space-x-3 animate-pulseError">
+            <AlertCircle className="w-6 h-6 mt-0.5" />
+            <p className="text-sm">{error}</p>
           </div>
         )}
         {resetMessage && (
-          <div className="bg-green-50 text-green-600 p-4 rounded mb-4 flex items-center space-x-2">
-            <CheckCircle className="w-5 h-5" />
-            <p>{resetMessage}</p>
+          <div className="mb-6 p-4 bg-green-100/80 text-green-800 rounded-xl flex items-center space-x-3 animate-pulseSuccess">
+            <CheckCircle className="w-6 h-6" />
+            <p className="text-sm">{resetMessage}</p>
           </div>
         )}
 
-        <form onSubmit={handleAgentLogin} className="space-y-6">
+        <form onSubmit={handleAgentLogin} className="space-y-8">
           <div>
-            <label className="block text-gray-700 mb-2">Agent Email</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <label className="block text-sm font-medium text-sky-800 mb-2">
+              Agent Email
+            </label>
+            <div className="relative group">
+              <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 w-6 h-6 text-cyan-400 group-hover:text-cyan-300 transition-all duration-300 group-hover:scale-110" />
               <input
                 name="email"
                 type="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full pl-10 p-3 border rounded-lg"
+                className="w-full pl-14 pr-4 py-4 rounded-xl bg-sky-50/50 border border-cyan-200/50 text-sky-900 placeholder-cyan-300/70 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-200/50 transition-all duration-500 shadow-inner hover:shadow-cyan-300/30 disabled:opacity-50"
                 placeholder="your.email@agency.com"
                 required
                 disabled={loading}
@@ -176,15 +256,17 @@ export function AgentLogin() {
             </div>
           </div>
           <div>
-            <label className="block text-gray-700 mb-2">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <label className="block text-sm font-medium text-sky-800 mb-2">
+              Password
+            </label>
+            <div className="relative group">
+              <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 w-6 h-6 text-cyan-400 group-hover:text-cyan-300 transition-all duration-300 group-hover:scale-110" />
               <input
                 name="password"
                 type="password"
                 value={formData.password}
                 onChange={handleChange}
-                className="w-full pl-10 p-3 border rounded-lg"
+                className="w-full pl-14 pr-4 py-4 rounded-xl bg-sky-50/50 border border-cyan-200/50 text-sky-900 placeholder-cyan-300/70 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-200/50 transition-all duration-500 shadow-inner hover:shadow-cyan-300/30 disabled:opacity-50"
                 placeholder="••••••••"
                 required
                 disabled={loading}
@@ -193,28 +275,77 @@ export function AgentLogin() {
           </div>
           <button
             type="submit"
-            className={`w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 flex items-center justify-center ${
-              loading ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className="w-full flex justify-center items-center py-4 px-6 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-300 text-white font-semibold shadow-lg hover:from-cyan-500 hover:to-blue-400 focus:outline-none focus:ring-4 focus:ring-cyan-300/50 transition-all duration-500 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 relative overflow-hidden group"
             disabled={loading}
           >
-            {loading ? 'Logging in...' : 'Sign In'} {!loading && <LogIn className="w-5 h-5 ml-2" />}
+            <span className="absolute inset-0 bg-gradient-to-r from-cyan-200/50 to-blue-200/50 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            {loading ? (
+              <Loader2 className="w-6 h-6 animate-spin" />
+            ) : (
+              <span className="relative z-10 flex items-center">
+                Sign In
+                <LogIn className="w-5 h-5 ml-2" />
+              </span>
+            )}
           </button>
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={handleForgotPassword}
-              className="text-blue-600 hover:underline text-sm"
-              disabled={loading}
-            >
-              Forgot Password?
-            </button>
-          </div>
-          <p className="text-center text-gray-600">
-            Not an agent? <Link to="/agent-register" className="text-blue-600 hover:underline">Register Now</Link>
-          </p>
         </form>
+
+        <div className="mt-6 text-center space-y-3">
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            className="text-sm text-cyan-500 hover:text-cyan-400 transition-colors duration-300 hover:underline disabled:opacity-50"
+            disabled={loading}
+          >
+            Forgot Password?
+          </button>
+          <p className="text-sm text-sky-800">
+            Not an agent?{' '}
+            <Link to="/agent-register" className="text-cyan-500 hover:text-cyan-400 hover:underline transition-colors duration-300">
+              Register Now
+            </Link>
+          </p>
+        </div>
       </div>
+
+      {/* Custom CSS for animations */}
+      <style jsx>{`
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-slideIn {
+          animation: slideIn 0.8s ease-out forwards;
+        }
+        @keyframes pulseSuccess {
+          0%, 100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.02);
+          }
+        }
+        .animate-pulseSuccess {
+          animation: pulseSuccess 0.6s ease-in-out;
+        }
+        @keyframes pulseError {
+          0%, 100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.02);
+          }
+        }
+        .animate-pulseError {
+          animation: pulseError 0.6s ease-in-out;
+        }
+      `}</style>
     </div>
   );
 }

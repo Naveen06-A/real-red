@@ -104,10 +104,9 @@ function ActivityLogReport({
     const day = d.toLocaleDateString('en-AU', { day: 'numeric' });
     const month = d.toLocaleDateString('en-AU', { month: 'long' });
     const year = d.toLocaleDateString('en-AU', { year: 'numeric' });
-    return `${weekday}, ${day} ${month} ${year}`; // Outputs e.g., "Wednesday, 21 May 2025"
+    return `${weekday}, ${day} ${month} ${year}`;
   };
 
-  // Use the log prop directly
   const displayLog = log;
 
   return (
@@ -338,9 +337,7 @@ export function ActivityLogger() {
       initializeAuth().then(() => {
         const updatedUser = useAuthStore.getState().user;
         const updatedProfile = useAuthStore.getState().profile;
-        if (!updatedUser || !updatedProfile) {
-          navigate('/agent-login');
-        } else if (updatedProfile.role !== 'agent') {
+        if (!updatedUser || !updatedProfile || (updatedProfile.role !== 'agent' && updatedProfile.role !== 'admin')) {
           navigate('/agent-login');
         } else {
           loadMarketingPlans(updatedUser.id);
@@ -348,7 +345,7 @@ export function ActivityLogger() {
       }).catch((err) => {
         setError('Failed to initialize authentication. Please try again.');
       });
-    } else if (user && profile?.role === 'agent') {
+    } else if (user && profile && (profile.role === 'agent' || profile.role === 'admin')) {
       loadMarketingPlans(user.id);
     } else {
       navigate('/agent-login');
@@ -370,6 +367,8 @@ export function ActivityLogger() {
       }));
     }
   }, [marketingPlans, selectedPlanId]);
+
+  const dashboardPath = profile?.role === 'admin' ? '/admin-dashboard' : '/agent-dashboard';
 
   const loadMarketingPlans = async (agentId: string) => {
     if (isLoadingPlans) return;
@@ -541,33 +540,40 @@ export function ActivityLogger() {
   };
 
   const handleActivitySubmit = async () => {
-    console.log('Submitting activityLog:', activityLog);
-
     if (!validateActivityForm()) {
       toast.error('Please fix the errors in the activity form before submitting.');
       return;
     }
-
-    const agentId = profile?.id || user?.id;
-    if (!profile || !agentId || activityLog.submitting) {
-      toast.error('Unable to log activity. Please ensure you are logged in.');
+  
+    if (!user?.id) {
+      toast.error('User not authenticated. Please log in.');
+      navigate('/agent-login');
       return;
     }
-
+  
+    if (activityLog.submitting) {
+      toast.error('Submission in progress. Please wait.');
+      return;
+    }
+  
     setActivityLog({ ...activityLog, submitting: true });
-
+  
     try {
-      const { data: agentData, error: agentError } = await supabase
-        .from('agents')
-        .select('agency_name')
-        .eq('id', agentId)
-        .single();
-
-      if (agentError) throw new Error(`Failed to fetch agency: ${agentError.message}`);
-
+      // Debug: Fetch the authenticated user's ID from Supabase
+      const { data: { user: supabaseUser }, error: authError } = await supabase.auth.getUser();
+      if (authError || !supabaseUser) {
+        throw new Error('Failed to verify authenticated user: ' + (authError?.message || 'No user found'));
+      }
+  
+      // Debug: Compare user.id with supabaseUser.id
+      console.log('User ID from useAuthStore:', user.id);
+      console.log('Authenticated User ID from Supabase:', supabaseUser.id);
+      if (user.id !== supabaseUser.id) {
+        throw new Error('Mismatch between useAuthStore user ID and Supabase authenticated user ID');
+      }
+  
       const activity = {
-        agent_id: agentId,
-        agency_name: agentData?.agency_name || '',
+        agent_id: user.id, // Ensure this matches auth.uid()
         activity_type: activityLog.type,
         activity_date: new Date(activityLog.date).toISOString(),
         street_name: capitalizeFirstLetter(activityLog.street_name.trim()),
@@ -587,13 +593,20 @@ export function ActivityLogger() {
           face_to_face_appraisals: parseInt(activityLog.face_to_face_appraisals || '0'),
         }),
       };
-
-      console.log('Activity to Supabase:', activity);
-
+  
+      // Debug: Log the activity object being inserted
+      console.log('Inserting activity:', activity);
+  
       const { error: activityError } = await supabase.from('agent_activities').insert([activity]);
-
-      if (activityError) throw new Error(`Failed to log activity: ${activityError.message}`);
-
+  
+      if (activityError) {
+        console.error('Supabase insert error:', activityError);
+        if (activityError.message.includes('violates row-level security policy')) {
+          throw new Error('You do not have permission to log this activity. Please ensure your account is correctly set up or contact your administrator.');
+        }
+        throw new Error(`Failed to log activity: ${activityError.message}`);
+      }
+  
       const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
       if (selectedPlan && !isCustomStreet) {
         let updatedStreets: PhoneCallStreet[] | DoorKnockStreet[];
@@ -630,12 +643,12 @@ export function ActivityLogger() {
               : street
           );
         }
-
+  
         const updateData =
           activityLog.type === 'phone_call'
             ? { phone_call_streets: updatedStreets }
             : { door_knock_streets: updatedStreets };
-
+  
         const { error: updateError } = await supabase
           .from('marketing_plans')
           .update({
@@ -643,9 +656,12 @@ export function ActivityLogger() {
             updated_at: new Date().toISOString(),
           })
           .eq('id', selectedPlan.id);
-
-        if (updateError) throw new Error(`Failed to update marketing plan: ${updateError.message}`);
-
+  
+        if (updateError) {
+          console.error('Supabase update error:', updateError);
+          throw new Error(`Failed to update marketing plan: ${updateError.message}`);
+        }
+  
         setMarketingPlans((prev) =>
           prev.map((plan) =>
             plan.id === selectedPlan.id
@@ -658,8 +674,7 @@ export function ActivityLogger() {
           )
         );
       }
-
-      // Store the submitted log before resetting
+  
       const submittedLog: ActivityLog = {
         type: activityLog.type,
         street_name: capitalizeFirstLetter(activityLog.street_name.trim()),
@@ -674,12 +689,11 @@ export function ActivityLogger() {
         notes: activityLog.notes.trim() || 'No notes provided',
         submitting: false,
       };
-
+  
       setSuccess(activityLog.type);
       setShowReport(true);
       toast.success('Activity logged successfully!');
-
-      // Reset the form
+  
       setActivityLog({
         type: activityLog.type,
         street_name: 'Main Street',
@@ -696,38 +710,39 @@ export function ActivityLogger() {
       });
       setErrors({});
       setIsCustomStreet(true);
-
-      // Set activityLog to submittedLog for the report
+  
       setActivityLog(submittedLog);
     } catch (err: any) {
-      toast.error(`Failed to log activity: ${err.message}`);
-      setError(`Failed to log activity: ${err.message}`);
+      console.error('Error logging activity:', err);
+      const errorMessage = err.message || 'An unexpected error occurred while logging the activity.';
+      toast.error(errorMessage);
+      setError(errorMessage);
     } finally {
       setActivityLog((prev) => ({ ...prev, submitting: false }));
     }
   };
-// Update street selection handler
-const handleStreetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-  const value = e.target.value;
-  const plan = marketingPlans.find(p => p.id === selectedPlanId);
-  
-  if (value === 'custom') {
-    setIsCustomStreet(true);
-    setActivityLog(prev => ({ ...prev, street_name: '' }));
-  } else if (plan) {
-    setIsCustomStreet(false);
-    // Verify street exists in plan
-    const streetExists = activityLog.type === 'door_knock'
-      ? plan.door_knock_streets.some(s => s.name === value)
-      : plan.phone_call_streets.some(s => s.name === value);
+
+  const handleStreetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    const plan = marketingPlans.find(p => p.id === selectedPlanId);
     
-    if (streetExists) {
-      setActivityLog(prev => ({ ...prev, street_name: value }));
-    } else {
-      toast.error('Selected street not found in marketing plan');
+    if (value === 'custom') {
+      setIsCustomStreet(true);
+      setActivityLog(prev => ({ ...prev, street_name: '' }));
+    } else if (plan) {
+      setIsCustomStreet(false);
+      const streetExists = activityLog.type === 'door_knock'
+        ? plan.door_knock_streets.some(s => s.name === value)
+        : plan.phone_call_streets.some(s => s.name === value);
+      
+      if (streetExists) {
+        setActivityLog(prev => ({ ...prev, street_name: value }));
+      } else {
+        toast.error('Selected street not found in marketing plan');
+      }
     }
-  }
-};
+  };
+
   const getAvailableStreets = () => {
     const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
     if (!selectedPlan) return [];
@@ -806,11 +821,11 @@ const handleStreetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <svg className="w-16 h-16 mx-auto mb-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-16 h-16 mx-auto mb-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-xl font-semibold text-red-600">
-              Please create a marketing plan before logging activities.
+            <p className="text-xl font-semibold text-yellow-600">
+              No marketing plans found. Please create a marketing plan to log activities.
             </p>
             <motion.button
               onClick={() => navigate('/marketing-plan')}
@@ -863,7 +878,7 @@ const handleStreetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
             transition={{ duration: 0.5, delay: 0.2 }}
           >
             <motion.button
-              onClick={() => navigate('/agent-dashboard')}
+              onClick={() => navigate(dashboardPath)}
               className="flex items-center px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-full hover:from-green-700 hover:to-green-800 transition-all shadow-md"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -1019,17 +1034,7 @@ const handleStreetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
                 <label className="block text-gray-800 font-semibold mb-2">Street Name *</label>
                 <select
                   value={isCustomStreet ? 'custom' : activityLog.street_name}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === 'custom') {
-                      setIsCustomStreet(true);
-                      setActivityLog({ ...activityLog, street_name: 'Main Street' });
-                    } else {
-                      setIsCustomStreet(false);
-                      setActivityLog({ ...activityLog, street_name: value });
-                    }
-                    validateActivityForm();
-                  }}
+                  onChange={handleStreetSelect}
                   className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
                   aria-label="Select street name"
                 >

@@ -1,4 +1,3 @@
-import { useState, useRef, useMemo } from 'react';
 import {
   ArcElement,
   BarElement,
@@ -16,16 +15,17 @@ import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { motion } from 'framer-motion';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { BarChart, ChevronDown, Download, Filter, Loader2, RefreshCcw, Trash2, X } from 'lucide-react';
+import { ChevronDown, Download, Filter, Loader2, RefreshCcw, Trash2, X } from 'lucide-react';
 import moment from 'moment';
+import { useMemo, useRef, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
-import { formatCurrency, formatArray, formatDate, calculateCommission, normalizeSuburb, generateHeatmapData, generatePriceTrendsData, selectStyles } from '../reportsUtils';
-import { PropertyDetails, PropertyMetrics, Filters } from './Reports';
+import { calculateCommission, formatArray, formatCurrency, formatDate, generateHeatmapData, generatePriceTrendsData, normalizeSuburb, selectStyles } from '../reportsUtils';
+import { Filters, PropertyDetails } from './Reports';
 
 ChartJS.register(
   CategoryScale,

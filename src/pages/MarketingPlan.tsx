@@ -120,53 +120,83 @@ export function MarketingPlanPage() {
 
   useEffect(() => {
     const initializeAgent = async () => {
-      if (!user || !profile) {
+      // Debug logging to inspect user and profile
+      console.log('MarketingPlanPage useEffect:', { user, profile });
+
+      // If user is not authenticated, redirect to login
+      if (!user) {
+        console.log('No user, redirecting to /agent-login');
         setLoading(false);
         navigate('/agent-login');
         return;
       }
 
-      try {
-        const { data: agentData, error: agentError } = await supabase
-          .from('agents')
-          .select('id, name')
-          .eq('id', user.id)
-          .single();
+      // Wait for profile to load
+      if (!profile) {
+        console.log('Profile not loaded yet, waiting...');
+        return;
+      }
 
-        if (agentError && agentError.code !== 'PGRST116') {
-          throw agentError;
-        }
-
-        if (!agentData) {
-          const { error: insertAgentError } = await supabase
+      // Check for valid role (admin or agent)
+      if (profile.role === 'agent' || profile.role === 'admin') {
+        console.log(`Valid role detected: ${profile.role}, proceeding with initialization`);
+        try {
+          // Fetch or create agent record
+          let { data: agentData, error: agentError } = await supabase
             .from('agents')
-            .insert({ id: user.id, name: profile.name || user.email || 'Unknown Agent' });
-          if (insertAgentError) {
-            throw insertAgentError;
+            .select('id, name')
+            .eq('id', user.id)
+            .single();
+
+          if (agentError && agentError.code !== 'PGRST116') {
+            console.error('Error fetching agent:', agentError);
+            throw agentError;
           }
-        }
 
-        setMarketingPlan((prev) => ({
-          ...prev,
-          agent: user.id,
-        }));
+          if (!agentData) {
+            console.log('No agent record found, creating one');
+            const { error: insertAgentError } = await supabase
+              .from('agents')
+              .insert({ id: user.id, name: profile.name || user.email || 'Unknown Agent' });
+            if (insertAgentError) {
+              console.error('Error inserting agent:', insertAgentError);
+              throw insertAgentError;
+            }
+            // Re-fetch agent data after insertion
+            const { data: newAgentData, error: newAgentError } = await supabase
+              .from('agents')
+              .select('id, name')
+              .eq('id', user.id)
+              .single();
+            if (newAgentError) {
+              console.error('Error fetching new agent:', newAgentError);
+              throw newAgentError;
+            }
+            agentData = newAgentData;
+          }
 
-        if (profile.role === 'agent') {
+          setMarketingPlan((prev) => ({
+            ...prev,
+            agent: user.id,
+          }));
+
           await loadMarketingPlan(user.id);
           await loadSavedPlans(user.id);
-        } else {
-          navigate('/agent-login');
+        } catch (error) {
+          console.error('Error initializing agent:', error);
+          setSaveError('Failed to initialize agent data');
+        } finally {
+          setLoading(false);
         }
-      } catch (error) {
-        console.error('Error initializing agent:', error);
-      } finally {
+      } else {
+        console.log(`Invalid role: ${profile.role}, redirecting to /agent-login`);
         setLoading(false);
+        navigate('/agent-login');
       }
     };
 
     initializeAgent();
   }, [user, profile, navigate]);
-
   useEffect(() => {
     if (user?.id) {
       fetchActualProgress(user.id);
@@ -707,6 +737,13 @@ export function MarketingPlanPage() {
       </div>
     );
   }
+  const handleBackToDashboard = () => {
+  if (profile?.role === 'admin') {
+    navigate('/admin-dashboard');
+  } else {
+    navigate('/agent-dashboard');
+  }
+};
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -740,7 +777,7 @@ export function MarketingPlanPage() {
           transition={{ duration: 0.5, delay: 0.2 }}
         >
           <motion.button
-            onClick={() => navigate('/agent-dashboard')}
+            onClick={handleBackToDashboard}
             className="flex items-center px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-full hover:from-green-700 hover:to-green-800 transition-all shadow-md"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}

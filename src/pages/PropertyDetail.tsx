@@ -183,7 +183,7 @@ const generatePDFReport = async (
   // Footer
   doc.setFontSize(8);
   doc.text(
-    'xAI Property Management - Confidential Report',
+    'Red Tulip Property Management - Confidential Report',
     doc.internal.pageSize.width / 2,
     doc.internal.pageSize.height - 10,
     { align: 'center' }

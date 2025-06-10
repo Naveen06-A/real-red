@@ -77,7 +77,7 @@ export function Navigation() {
                   <LogIn className="w-5 h-5" />
                   <span>Agent Login</span>
                 </Link>
-                <Link to="/login" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
+                <Link to="/admin-login" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
                   <LogIn className="w-5 h-5" />
                   <span>Admin Login</span>
                 </Link>
