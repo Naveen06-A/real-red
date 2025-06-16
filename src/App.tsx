@@ -10,7 +10,7 @@ import { Navigation } from './components/Navigation';
 import { AgentLogin } from './pages/AgentLogin';
 import { AgentDashboard } from './pages/AgentDashboard';
 import { Reports } from './pages/Reports';
-import { AgentReports } from './agent-reports';
+import { AgentReports } from './pages/AgentReports';
 import { AgentRegister } from './pages/AgentRegister';
 import { useAuthStore } from './store/authStore';
 import { PropertyPrediction } from './pages/PropertyPrediction';
@@ -28,6 +28,7 @@ import Comparisons from './pages/Comparisons';
 import AdminCommissionByAgency from './pages/AdminCommissionByAgency';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
+import {  AgentManagement} from './pages/AgentManagement';
 
 // PrivateRoute for general authenticated users
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -120,6 +121,8 @@ function App() {
             <Route path="/progress-report" element={<ProgressReportPage />} />
             <Route path="/admin-dashboard" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
             <Route path="/agent-dashboard" element={<AgentRoute><AgentDashboard /></AgentRoute>} />
+            <Route path="/agent-management" element={<AgentRoute><AgentManagement /></AgentRoute>} />
+            <Route path="/agent-reports" element={<AgentRoute><AgentReports /></AgentRoute>} />
             <Route path="/agent-dashboard/door-knocks" element={<AgentRoute><DoorKnocks /></AgentRoute>} />
             <Route path="/agent-dashboard/phone-calls" element={<AgentRoute><PhoneCalls /></AgentRoute>} />
             <Route path="/marketing-plan" element={<MarketingPlanPage />} />
@@ -131,6 +134,7 @@ function App() {
             <Route path="/market-reports" element={<PrivateRoute><MarketReports /></PrivateRoute>} />
             <Route path="/property-prediction/:id" element={<PrivateRoute><PropertyPrediction /></PrivateRoute>} />
             <Route path="/property-form" element={<PropertyForm />} />
+
             <Route path="/comparisons" element={<AgentRoute><Comparisons /></AgentRoute>} />
             <Route
               path="/commission-by-agency"

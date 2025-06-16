@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { toast } from 'react-toastify';
 import 'leaflet/dist/leaflet.css';
 import { PropertyDetails } from './Reports';
+import { Plus, Minus, X, Eye, Home, DollarSign, User, CheckCircle } from 'lucide-react';
 
 // Interfaces
 interface NearbyProperties {
@@ -111,9 +112,7 @@ function ZoomControls() {
         whileTap={{ scale: 0.9 }}
         title="Zoom In"
       >
-        <svg className="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-        </svg>
+        <Plus className="w-6 h-6 text-gray-800" />
       </motion.button>
       <motion.button
         onClick={handleZoomOut}
@@ -122,9 +121,7 @@ function ZoomControls() {
         whileTap={{ scale: 0.9 }}
         title="Zoom Out"
       >
-        <svg className="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 12h16" />
-        </svg>
+        <Minus className="w-6 h-6 text-gray-800" />
       </motion.button>
     </div>
   );
@@ -151,9 +148,7 @@ function StreetViewModal({
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold">Street View</h3>
           <button onClick={onClose} className="text-gray-600 hover:text-gray-800">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="w-6 h-6" />
           </button>
         </div>
         <iframe
@@ -278,15 +273,7 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
       transition={{ duration: 0.5 }}
     >
       <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-        <svg className="w-6 h-6 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-          />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
+        <Home className="w-6 h-6 mr-2 text-indigo-600" />
         Property Location Map
       </h3>
       <div className="mb-4">
@@ -337,19 +324,20 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
                 <h4 className="font-semibold">
                   {selectedProperty.street_number} {selectedProperty.street_name}, {selectedProperty.suburb}
                 </h4>
-                <p>Price: {selectedProperty.price ? formatCurrency(selectedProperty.price) : 'N/A'}</p>
-                <p>Sold Price: {selectedProperty.sold_price ? formatCurrency(selectedProperty.sold_price) : 'N/A'}</p>
-                <p>Type: {selectedProperty.property_type || 'N/A'}</p>
-                <p>Agent: {selectedProperty.agent_name || 'N/A'}</p>
-                <p>Status: {selectedProperty.category || 'N/A'}</p>
+                <p className="flex items-center"><DollarSign className="w-4 h-4 mr-1" />Price: {selectedProperty.price ? formatCurrency(selectedProperty.price) : 'N/A'}</p>
+                <p className="flex items-center"><DollarSign className="w-4 h-4 mr-1" />Sold Price: {selectedProperty.sold_price ? formatCurrency(selectedProperty.sold_price) : 'N/A'}</p>
+                <p className="flex items-center"><Home className="w-4 h-4 mr-1" />Type: {selectedProperty.property_type || 'N/A'}</p>
+                <p className="flex items-center"><User className="w-4 h-4 mr-1" />Agent: {selectedProperty.agent_name || 'N/A'}</p>
+                <p className="flex items-center"><CheckCircle className="w-4 h-4 mr-1" />Status: {selectedProperty.category || 'N/A'}</p>
                 <button
                   onClick={() => {
                     console.log('Opening street view from popup');
                     setStreetViewCoords(center);
                     setShowStreetView(true);
                   }}
-                  className="mt-2 text-blue-600 hover:underline"
+                  className="mt-2 text-blue-600 hover:underline flex items-center"
                 >
+                  <Eye className="w-4 h-4 mr-1" />
                   View Street View
                 </button>
               </div>
@@ -379,19 +367,20 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
                   <h4 className="font-semibold">
                     {prop.street_number} {prop.street_name}, {prop.suburb}
                   </h4>
-                  <p>Price: {prop.price ? formatCurrency(prop.price) : 'N/A'}</p>
-                  <p>Sold Price: {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}</p>
-                  <p>Type: {prop.property_type || 'N/A'}</p>
-                  <p>Agent: {prop.agent_name || 'N/A'}</p>
-                  <p>Status: {prop.category || 'N/A'}</p>
+                  <p className="flex items-center"><DollarSign className="w-4 h-4 mr-1" />Price: {prop.price ? formatCurrency(prop.price) : 'N/A'}</p>
+                  <p className="flex items-center"><DollarSign className="w-4 h-4 mr-1" />Sold Price: {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}</p>
+                  <p className="flex items-center"><Home className="w-4 h-4 mr-1" />Type: {prop.property_type || 'N/A'}</p>
+                  <p className="flex items-center"><User className="w-4 h-4 mr-1" />Agent: {prop.agent_name || 'N/A'}</p>
+                  <p className="flex items-center"><CheckCircle className="w-4 h-4 mr-1" />Status: {prop.category || 'N/A'}</p>
                   <button
                     onClick={() => {
                       console.log('Opening street view from popup');
                       setStreetViewCoords(coords);
                       setShowStreetView(true);
                     }}
-                    className="mt-2 text-blue-600 hover:underline"
+                    className="mt-2 text-blue-600 hover:underline flex items-center"
                   >
+                    <Eye className="w-4 h-4 mr-1" />
                     View Street View
                   </button>
                 </div>
@@ -422,19 +411,20 @@ export function AgentPropertyMap({ properties, selectedProperty, onPropertySelec
                   <h4 className="font-semibold">
                     {prop.street_number} {prop.street_name}, {prop.suburb}
                   </h4>
-                  <p>Price: {prop.price ? formatCurrency(prop.price) : 'N/A'}</p>
-                  <p>Sold Price: {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}</p>
-                  <p>Type: {prop.property_type || 'N/A'}</p>
-                  <p>Agent: {prop.agent_name || 'N/A'}</p>
-                  <p>Status: {prop.category || 'N/A'}</p>
+                  <p className="flex items-center"><DollarSign className="w-4 h-4 mr-1" />Price: {prop.price ? formatCurrency(prop.price) : 'N/A'}</p>
+                  <p className="flex items-center"><DollarSign className="w-4 h-4 mr-1" />Sold Price: {prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A'}</p>
+                  <p className="flex items-center"><Home className="w-4 h-4 mr-1" />Type: {prop.property_type || 'N/A'}</p>
+                  <p className="flex items-center"><User className="w-4 h-4 mr-1" />Agent: {prop.agent_name || 'N/A'}</p>
+                  <p className="flex items-center"><CheckCircle className="w-4 h-4 mr-1" />Status: {prop.category || 'N/A'}</p>
                   <button
                     onClick={() => {
                       console.log('Opening street view from popup');
                       setStreetViewCoords(coords);
                       setShowStreetView(true);
                     }}
-                    className="mt-2 text-blue-600 hover:underline"
+                    className="mt-2 text-blue-600 hover:underline flex items-center"
                   >
+                    <Eye className="w-4 h-4 mr-1" />
                     View Street View
                   </button>
                 </div>

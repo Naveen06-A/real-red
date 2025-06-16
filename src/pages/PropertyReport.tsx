@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Fragment } from 'react';
 import { supabase } from '../lib/supabase';
-import { Loader2, Download, Filter, BarChart, ArrowUpDown, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Download, Filter, BarChart, ArrowUpDown, Trash2, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { Bar } from 'react-chartjs-2';
+import { Dialog, Transition } from '@headlessui/react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -21,6 +22,22 @@ import { Property } from '../types/Property';
 import { debounce } from 'lodash';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+
+interface PropertyFormData {
+  id: string;
+  street_number: string;
+  street_name: string;
+  suburb: string;
+  price: number;
+  property_type: string;
+  bedrooms: number;
+  bathrooms: number;
+  car_garage: number;
+  sqm: number;
+  agent_name: string;
+  agency_name: string;
+  category: string;
+}
 
 interface PropertyMetrics {
   listingsBySuburb: Record<string, { listed: number; sold: number }>;
@@ -64,6 +81,98 @@ export function PropertyReport() {
     agents: [] as string[],
     propertyTypes: [] as string[],
   });
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<PropertyFormData | null>(null);
+  const [formErrors, setFormErrors] = useState<Partial<PropertyFormData>>({});
+
+  const handleEditClick = (property: Property) => {
+    setEditingProperty({
+      id: property.id,
+      street_number: property.street_number || '',
+      street_name: property.street_name || '',
+      suburb: property.suburb || '',
+      price: property.price || 0,
+      property_type: property.property_type || '',
+      bedrooms: property.bedrooms || 0,
+      bathrooms: property.bathrooms || 0,
+      car_garage: property.car_garage || 0,
+      sqm: property.sqm || 0,
+      agent_name: property.agent_name || '',
+      agency_name: property.agency_name || '',
+      category: property.category || '',
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProperty) return;
+
+    const success = await updateProperty(editingProperty);
+    if (success) {
+      setIsEditModalOpen(false);
+    }
+  };
+
+  const updateProperty = async (formData: PropertyFormData) => {
+    try {
+      const errors: Partial<PropertyFormData> = {};
+      if (!formData.street_name) errors.street_name = 'Street name is required';
+      if (!formData.suburb) errors.suburb = 'Suburb is required';
+      if (formData.price <= 0) errors.price = 'Price must be greater than 0';
+      if (!formData.property_type) errors.property_type = 'Property type is required';
+
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
+        return false;
+      }
+
+      const { error } = await supabase
+        .from('properties')
+        .update({
+          street_number: formData.street_number,
+          street_name: formData.street_name,
+          suburb: formData.suburb,
+          price: formData.price,
+          property_type: formData.property_type,
+          bedrooms: formData.bedrooms,
+          bathrooms: formData.bathrooms,
+          car_garage: formData.car_garage,
+          sqm: formData.sqm,
+          agent_name: formData.agent_name,
+          agency_name: formData.agency_name,
+          category: formData.category,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', formData.id);
+
+      if (error) throw error;
+
+      setProperties(prev =>
+        prev.map(p =>
+          p.id === formData.id ? { ...p, ...formData } : p
+        )
+      );
+      setFilteredProperties(prev =>
+        prev.map(p =>
+          p.id === formData.id ? { ...p, ...formData } : p
+        )
+      );
+
+      toast.success('Property updated successfully');
+      setIsEditModalOpen(false);
+      setEditingProperty(null);
+      setFormErrors({});
+      generateMetrics(properties.map(p =>
+        p.id === formData.id ? { ...p, ...formData } : p
+      ));
+      return true;
+    } catch (err: any) {
+      toast.error('Failed to update property');
+      console.error('Update error:', err);
+      return false;
+    }
+  };
 
   const totalPages = Math.ceil(filteredProperties.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -610,21 +719,39 @@ export function PropertyReport() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Property Details
+                    <button onClick={() => handleSort('property_type')}>
+                      <ArrowUpDown className="inline w-4 h-4 ml-1" />
+                    </button>
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Location
+                    <button onClick={() => handleSort('suburb')}>
+                      <ArrowUpDown className="inline w-4 h-4 ml-1" />
+                    </button>
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Price
+                    <button onClick={() => handleSort('price')}>
+                      <ArrowUpDown className="inline w-4 h-4 ml-1" />
+                    </button>
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Features
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
+                    <button onClick={() => handleSort('category')}>
+                      <ArrowUpDown className="inline w-4 h-4 ml-1" />
+                    </button>
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Agent
+                    <button onClick={() => handleSort('agent_name')}>
+                      <ArrowUpDown className="inline w-4 h-4 ml-1" />
+                    </button>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
                   </th>
                 </tr>
               </thead>
@@ -679,6 +806,24 @@ export function PropertyReport() {
                       </div>
                       <div className="text-sm text-gray-500">
                         {property.agency_name}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => handleEditClick(property)}
+                          className="text-blue-600 hover:text-blue-800"
+                          title="Edit Property"
+                        >
+                          <Pencil className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => deleteProperty(property.id)}
+                          className="text-red-600 hover:text-red-800"
+                          title="Delete Property"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -799,7 +944,218 @@ export function PropertyReport() {
           <Download className="w-5 h-5 mr-2" />
           Export Excel
         </button>
+        <button
+          onClick={exportPropertyReportHTML}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          <Download className="w-5 h-5 mr-2" />
+          Export HTML
+        </button>
       </div>
+
+      <Transition appear show={isEditModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-10" onClose={() => setIsEditModalOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black bg-opacity-25" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 text-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
+                  <Dialog.Title as="h3" className="text-lg font-medium leading-6 text-gray-900">
+                    Edit Property
+                  </Dialog.Title>
+                  <form onSubmit={handleEditSubmit} className="mt-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Street Number</label>
+                      <input
+                        type="text"
+                        value={editingProperty?.street_number || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, street_number: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Street Name</label>
+                      <input
+                        type="text"
+                        value={editingProperty?.street_name || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, street_name: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                      {formErrors.street_name && (
+                        <p className="mt-1 text-sm text-red-600">{formErrors.street_name}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Suburb</label>
+                      <input
+                        type="text"
+                        value={editingProperty?.suburb || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, suburb: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                      {formErrors.suburb && (
+                        <p className="mt-1 text-sm text-red-600">{formErrors.suburb}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Price</label>
+                      <input
+                        type="number"
+                        value={editingProperty?.price || 0}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, price: parseFloat(e.target.value) } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                      {formErrors.price && (
+                        <p className="mt-1 text-sm text-red-600">{formErrors.price}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Property Type</label>
+                      <input
+                        type="text"
+                        value={editingProperty?.property_type || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, property_type: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                      {formErrors.property_type && (
+                        <p className="mt-1 text-sm text-red-600">{formErrors.property_type}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Bedrooms</label>
+                      <input
+                        type="number"
+                        value={editingProperty?.bedrooms || 0}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, bedrooms: parseInt(e.target.value) } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Bathrooms</label>
+                      <input
+                        type="number"
+                        value={editingProperty?.bathrooms || 0}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, bathrooms: parseInt(e.target.value) } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Car Garage</label>
+                      <input
+                        type="number"
+                        value={editingProperty?.car_garage || 0}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, car_garage: parseInt(e.target.value) } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Square Meters</label>
+                      <input
+                        type="number"
+                        value={editingProperty?.sqm || 0}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, sqm: parseInt(e.target.value) } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Agent Name</label>
+                      <input
+                        type="text"
+                        value={editingProperty?.agent_name || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, agent_name: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Agency Name</label>
+                      <input
+                        type="text"
+                        value={editingProperty?.agency_name || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, agency_name: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Category</label>
+                      <select
+                        value={editingProperty?.category || ''}
+                        onChange={(e) =>
+                          setEditingProperty((prev) => prev ? { ...prev, category: e.target.value } : prev)
+                        }
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      >
+                        <option value="">Select Category</option>
+                        <option value="Listing">Listing</option>
+                        <option value="Sold">Sold</option>
+                        <option value="Under Offer">Under Offer</option>
+                      </select>
+                    </div>
+                    <div className="mt-6 flex justify-end space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditModalOpen(false)}
+                        className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </form>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      {renderHeatmap()}
+      {renderPriceTrends()}
     </div>
   );
 }

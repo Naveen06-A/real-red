@@ -1,9 +1,8 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { LogOut, User, Building, BarChart3, Users, LogIn } from 'lucide-react';
+import { LogOut, User, Building, BarChart3, Users, LogIn, Shield } from 'lucide-react';
 import { Logo } from './Logo';
-
 export function Navigation() {
   const { user, profile, signOut } = useAuthStore();
   const navigate = useNavigate();
@@ -49,12 +48,12 @@ export function Navigation() {
                 {profile?.role === 'admin' && (
                   <>
                     <Link to="/admin" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
-                      <User className="w-5 h-5" />
-                      <span>Admin Dashboard</span>
+                      <Shield className="w-5 h-5" />
+                      <span>Admin</span>
                     </Link>
                     <Link to="/agent-management" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
                       <Users className="w-5 h-5" />
-                      <span>User Management</span>
+                      <span>Agents</span>
                     </Link>
                   </>
                 )}

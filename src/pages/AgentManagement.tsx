@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
-import { Users, Plus, Loader2 } from 'lucide-react';
+import { Users, Plus, Loader2, Pencil, Trash2, Home } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -235,6 +235,7 @@ export function AgentManagement() {
                 <th className="text-left py-2">Name</th>
                 <th className="text-left py-2">Role</th>
                 <th className="text-left py-2">Permissions</th>
+                <th className="text-left py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -244,10 +245,35 @@ export function AgentManagement() {
                   <td className="py-2">{agent.name || '-'}</td>
                   <td className="py-2">{agent.role}</td>
                   <td className="py-2">
-                    {Object.entries(agent.permissions)
-                      .filter(([_, value]) => value)
-                      .map(([key]) => key)
-                      .join(', ') || 'None'}
+                    <div className="flex items-center space-x-2">
+                      {agent.permissions.canRegisterProperties && (
+                        <Home className="w-4 h-4 text-green-600" title="Can Register Properties" />
+                      )}
+                      {agent.permissions.canEditProperties && (
+                        <Pencil className="w-4 h-4 text-yellow-600" title="Can Edit Properties" />
+                      )}
+                      {agent.permissions.canDeleteProperties && (
+                        <Trash2 className="w-4 h-4 text-red-600" title="Can Delete Properties" />
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-2">
+                    <button
+                      onClick={() => {
+                        /* Handle edit logic */
+                      }}
+                      className="p-1 text-blue-600 hover:text-blue-800"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        /* Handle delete logic */
+                      }}
+                      className="p-1 text-red-600 hover:text-red-800 ml-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
               ))}

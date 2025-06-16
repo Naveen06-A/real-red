@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
-import { Phone, Users, DoorClosed, Link as LinkIcon, CheckCircle, TrendingUp, Edit2, Search, Download, Mic, Building, Bell } from 'lucide-react';
+import { Phone, Users, DoorClosed, Link as LinkIcon, CheckCircle, TrendingUp, Edit2, Search, Download, Mic, Building, Bell, Calendar, Tag, Home, BarChart2, PieChart as PieChartIcon } from 'lucide-react';
 import * as tf from '@tensorflow/tfjs';
 import { Navigation } from '../components/Navigation';
 type ActivityType = 'phone_call' | 'client_meeting' | 'door_knock' | 'connection';
@@ -518,7 +518,7 @@ export function AgentReports() {
             </div>
 
             <div className="mb-4">
-              <label className="block text-gray-700 mb-2">Notes</label>
+              <label className="block text-gray-700 mb-2 flex items-center"><Edit2 className="w-4 h-4 mr-2" />Notes</label>
               <textarea
                 value={editNotes}
                 onChange={(e) => setEditNotes(e.target.value)}
@@ -526,22 +526,10 @@ export function AgentReports() {
                 className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 resize-none"
                 rows={3}
               />
-              <div className="mt-1 text-sm text-gray-500">
-                Suggestions:{' '}
-                {getSuggestions(editingActivity.activity_type).noteSuggestions.map((suggestion) => (
-                  <span
-                    key={suggestion}
-                    className="cursor-pointer hover:text-blue-500"
-                    onClick={() => setEditNotes(suggestion!)}
-                  >
-                    {suggestion} |{' '}
-                  </span>
-                ))}
-              </div>
             </div>
 
             <div className="mb-4">
-              <label className="block text-gray-700 mb-2">Tags</label>
+              <label className="block text-gray-700 mb-2 flex items-center"><Tag className="w-4 h-4 mr-2" />Tags</label>
               <input
                 type="text"
                 value={editTags.join(', ')}
@@ -549,22 +537,10 @@ export function AgentReports() {
                 placeholder="e.g., follow-up, urgent"
                 className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500"
               />
-              <div className="mt-1 text-sm text-gray-500">
-                Suggestions:{' '}
-                {getSuggestions(editingActivity.activity_type).tagSuggestions.map((tag) => (
-                  <span
-                    key={tag}
-                    className="cursor-pointer hover:text-blue-500"
-                    onClick={() => setEditTags((prev) => [...prev, tag])}
-                  >
-                    {tag} |{' '}
-                  </span>
-                ))}
-              </div>
             </div>
 
             <div className="mb-4">
-              <label className="block text-gray-700 mb-2">Link to Property</label>
+              <label className="block text-gray-700 mb-2 flex items-center"><Home className="w-4 h-4 mr-2" />Link to Property</label>
               <select
                 value={editPropertyId || ''}
                 onChange={(e) => setEditPropertyId(e.target.value || undefined)}
@@ -575,38 +551,20 @@ export function AgentReports() {
                   <option key={property.id} value={property.id}>
                     {property.name} ({property.property_type})
                     {property.street_name ? ` - ${property.street_name}` : ''}
-                    {property.features?.length ? ` - ${property.features.join(', ')}` : ''}
                   </option>
                 ))}
               </select>
-              {editPropertyId && (
-                <div className="mt-2">
-                  <span
-                    className="inline-block px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm cursor-pointer"
-                    onClick={() => setEditPropertyId(undefined)}
-                  >
-                    {properties.find((p) => p.id === editPropertyId)?.name} -{' '}
-                    {properties.find((p) => p.id === editPropertyId)?.property_type}
-                    {properties.find((p) => p.id === editPropertyId)?.street_name
-                      ? ` (${properties.find((p) => p.id === editPropertyId)?.street_name})`
-                      : ''}
-                    {properties.find((p) => p.id === editPropertyId)?.features?.length
-                      ? ` [${properties.find((p) => p.id === editPropertyId)?.features?.join(', ')}]`
-                      : ''}{' '}
-                    ✕
-                  </span>
-                </div>
-              )}
             </div>
 
             <div className="mb-4">
-              <p className="text-sm font-medium mb-2">Related Activities</p>
+              <p className="text-sm font-medium mb-2 flex items-center"><Calendar className="w-4 h-4 mr-2" />Related Activities</p>
               <div className="max-h-32 overflow-y-auto">
                 {activities
                   .filter((a) => a.activity_type === editingActivity.activity_type && a.id !== editingActivity.id)
                   .slice(0, 5)
                   .map((a) => (
-                    <div key={a.id} className="text-sm text-gray-600 mb-1">
+                    <div key={a.id} className="text-sm text-gray-600 mb-1 flex items-center">
+                      <Calendar className="w-3 h-3 mr-2" />
                       <span>{new Date(a.activity_date).toLocaleDateString()}:</span> {a.notes || 'No notes'}
                     </div>
                   ))}
@@ -705,27 +663,35 @@ export function AgentReports() {
       </div>
 
       <div className="mb-8">
-        <h2 className="text-2xl font-semibold mb-4">Recent Activities</h2>
+        <h2 className="text-2xl font-semibold mb-4 flex items-center"><Calendar className="w-6 h-6 mr-2" />Recent Activities</h2>
         {filteredActivities.length > 0 ? (
           <div className="space-y-4">
             {filteredActivities.slice(0, 10).map((activity) => {
               const linkedProperty = properties.find((p) => p.id === activity.property_id);
               return (
                 <div key={activity.id} className="bg-white p-4 rounded-lg shadow-md flex justify-between items-center">
-                  <div>
-                    <p className="font-semibold capitalize">{activity.activity_type.replace('_', ' ')}</p>
-                    <p className="text-gray-600">{activity.notes || 'No notes'}</p>
-                    {linkedProperty && (
-                      <span className="inline-block px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm mt-1">
-                        {linkedProperty.name} - {linkedProperty.property_type}
-                        {linkedProperty.street_name ? ` (${linkedProperty.street_name})` : ''}
-                        {linkedProperty.features?.length ? ` [${linkedProperty.features.join(', ')}]` : ''}
-                      </span>
-                    )}
-                    <p className="text-sm text-gray-500">
-                      {new Date(activity.activity_date).toLocaleString()}
-                      {activity.tags?.length ? ` | Tags: ${activity.tags.join(', ')}` : ''}
-                    </p>
+                  <div className="flex items-center">
+                    <div className="mr-4">
+                      {activity.activity_type === 'phone_call' && <Phone className="w-6 h-6 text-blue-500" />}
+                      {activity.activity_type === 'client_meeting' && <Users className="w-6 h-6 text-green-500" />}
+                      {activity.activity_type === 'door_knock' && <DoorClosed className="w-6 h-6 text-yellow-500" />}
+                      {activity.activity_type === 'connection' && <LinkIcon className="w-6 h-6 text-orange-500" />}
+                    </div>
+                    <div>
+                      <p className="font-semibold capitalize">{activity.activity_type.replace('_', ' ')}</p>
+                      <p className="text-gray-600">{activity.notes || 'No notes'}</p>
+                      {linkedProperty && (
+                        <span className="inline-block px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm mt-1">
+                          <Home className="w-3 h-3 inline-block mr-1" />
+                          {linkedProperty.name}
+                        </span>
+                      )}
+                      <p className="text-sm text-gray-500 mt-1">
+                        <Calendar className="w-3 h-3 inline-block mr-1" />
+                        {new Date(activity.activity_date).toLocaleString()}
+                        {activity.tags?.length ? ` | Tags: ${activity.tags.join(', ')}` : ''}
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => {
@@ -747,7 +713,7 @@ export function AgentReports() {
         )}
       </div>
 
-      <h2 className="text-2xl font-semibold mb-4">Daily Activity</h2>
+      <h2 className="text-2xl font-semibold mb-4 flex items-center"><BarChart2 className="w-6 h-6 mr-2" />Daily Activity</h2>
       {chartData.length > 0 ? (
         <BarChart width={600} height={300} data={chartData} className="mx-auto">
           <CartesianGrid strokeDasharray="3 3" />
@@ -766,7 +732,7 @@ export function AgentReports() {
 
       {pieData.length > 0 && (
         <div className="mt-8">
-          <h2 className="text-2xl font-semibold mb-4">Activity Distribution</h2>
+          <h2 className="text-2xl font-semibold mb-4 flex items-center"><PieChartIcon className="w-6 h-6 mr-2" />Activity Distribution</h2>
           <PieChart width={400} height={400} className="mx-auto">
             <Pie
               data={pieData}

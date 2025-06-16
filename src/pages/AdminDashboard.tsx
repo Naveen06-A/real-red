@@ -64,8 +64,9 @@ export function AdminDashboard() {
     { name: 'Add Property', path: '/property-form', icon: Home },
     { name: 'Create Marketing Plan', path: '/marketing-plan', icon: FileText },
     { name: 'Activity Log', path: '/activity-logger', icon: Activity },
-    { name: 'Progress Report', path: '/progress-report', icon: BarChart },
+    { name: 'Progress Report', path: '/progress-report-page', icon: BarChart },
     { name: 'Reports', path: '/reports', icon: FileText },
+    {name:'Agent Report',path:'/agent-reports',icon:FileText},
   ];
 
   const fetchMarketingPlans = async () => {
@@ -115,7 +116,7 @@ export function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('properties')
-        .select('id, street_number, street_name, suburb, property_type, price, bedrooms, bathrooms, car_garage, category, agent_id')
+        .select('id, street_number, street_name, suburb, property_type, price, bedrooms, bathrooms, car_garage, category, agent_id,agent_name')
         .order('created_at', { ascending: false });
       if (error) throw error;
       setProperties(data || []);
@@ -128,14 +129,28 @@ export function AdminDashboard() {
   };
 
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      await fetchAgents(); // Fetch agents first
-      await fetchProperties(); // Then fetch properties
-      setLoading(false);
-    };
-    loadData();
-  }, []);
+  const loadData = async () => {
+    setLoading(true);
+    await fetchAgents(); // Fetch agents first
+    await fetchProperties(); // Then fetch properties
+    // Fetch all property IDs for navigation
+    const { data: propertyIdsData, error: propertyIdsError } = await supabase
+      .from('properties')
+      .select('id')
+      .order('created_at', { ascending: false });
+    if (propertyIdsError) {
+      toast.error('Failed to fetch property IDs: ' + propertyIdsError.message);
+    } else {
+      setAllPropertyIds(propertyIdsData.map(item => item.id));
+    }
+    setLoading(false);
+  };
+  loadData();
+}, []);
+
+  const [allPropertyIds, setAllPropertyIds] = useState<string[]>([]);
+
+
 
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();

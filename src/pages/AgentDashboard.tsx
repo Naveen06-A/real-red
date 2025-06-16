@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Mic, Clock, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2 } from 'lucide-react';
+import { Mic, Clock, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car } from 'lucide-react';
 import { IndividualPropertyReport } from './IndividualPropertyReport';
 import { supabase } from '../lib/supabase';
 import jsPDF from 'jspdf';
@@ -653,27 +653,25 @@ export function AgentDashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
-        <Link to="/property-form" className="bg-blue-600 text-white p-6 rounded-lg hover:bg-blue-700 transition">
-          <h2 className="text-xl font-semibold">Add Property</h2>
-          <p className="text-blue-100">List a new property</p>
+        <Link to="/property-form" className="bg-blue-600 text-white p-6 rounded-lg hover:bg-blue-700 transition flex flex-col items-center justify-center">
+          <PlusCircle className="w-8 h-8 mb-2" />
+          <h2 className="text-xl font-semibold text-center">Add Property</h2>
         </Link>
-        <Link to="/marketing-plan" className="bg-purple-600 text-white p-6 rounded-lg hover:bg-purple-700 transition">
-          <h2 className="text-xl font-semibold">Marketing Plan</h2>
-          <p className="text-purple-100">Plan your weekly activities</p>
+        <Link to="/marketing-plan" className="bg-purple-600 text-white p-6 rounded-lg hover:bg-purple-700 transition flex flex-col items-center justify-center">
+          <FileText className="w-8 h-8 mb-2" />
+          <h2 className="text-xl font-semibold text-center">Marketing Plan</h2>
         </Link>
-        <Link to="/reports" className="bg-green-600 text-white p-6 rounded-lg hover:bg-green-700 transition">
-          <h2 className="text-xl font-semibold">Reports</h2>
-          <p className="text-purple-100">View performance metrics</p>
+        <Link to="/reports" className="bg-green-600 text-white p-6 rounded-lg hover:bg-green-700 transition flex flex-col items-center justify-center">
+          <BarChart className="w-8 h-8 mb-2" />
+          <h2 className="text-xl font-semibold text-center">Reports</h2>
         </Link>
-        <Link to="/activity-logger" className="bg-orange-600 text-white p-6 rounded-lg hover:bg-orange-700 transition">
-          <h2 className="text-xl font-semibold flex items-center">
-            <Clock className="mr-2" /> Activity Logger
-          </h2>
-          <p className="text-orange-100">Log phone calls & door knocks</p>
+        <Link to="/activity-logger" className="bg-orange-600 text-white p-6 rounded-lg hover:bg-orange-700 transition flex flex-col items-center justify-center">
+          <Activity className="w-8 h-8 mb-2" />
+          <h2 className="text-xl font-semibold text-center">Activity Logger</h2>
         </Link>
-        <Link to="/progress-report" className="bg-teal-600 text-white p-6 rounded-lg hover:bg-teal-700 transition">
-          <h2 className="text-xl font-semibold">Progress Report</h2>
-          <p className="text-teal-100">View marketing & activity progress</p>
+        <Link to="/progress-report" className="bg-teal-600 text-white p-6 rounded-lg hover:bg-teal-700 transition flex flex-col items-center justify-center">
+          <CheckCircle className="w-8 h-8 mb-2" />
+          <h2 className="text-xl font-semibold text-center">Progress Report</h2>
         </Link>
       </div>
 
@@ -1101,10 +1099,20 @@ export function AgentDashboard() {
                 </p>
                 <p className="text-gray-600">Type: {property.property_type || 'Unknown'}</p>
                 <p className="text-gray-600">Category: {property.category || 'Unknown'}</p>
-                <p className="text-gray-600">
-                  Beds: {property.bedrooms ?? 'N/A'} | Baths: {property.bathrooms ?? 'N/A'} | Garage:{' '}
-                  {property.car_garage ?? 'N/A'}
-                </p>
+                <div className="flex items-center text-gray-600 space-x-4 mt-2">
+                  <div className="flex items-center">
+                    <Home className="w-4 h-4 mr-1" />
+                    <span>{property.bedrooms ?? 'N/A'}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <Bath className="w-4 h-4 mr-1" />
+                    <span>{property.bathrooms ?? 'N/A'}</span>
+                  </div>
+                  <div className="flex items-center">
+                    <Car className="w-4 h-4 mr-1" />
+                    <span>{property.car_garage ?? 'N/A'}</span>
+                  </div>
+                </div>
                 <p className="text-green-600 font-bold mt-2">
                   {property.price ? formatCurrency(property.price) : 'Price N/A'}
                 </p>

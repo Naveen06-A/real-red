@@ -566,6 +566,18 @@ export function MarketingPlanPage() {
     setSelectedActivity('all');
     setSaveError(null);
     setSaveSuccess(false);
+    setActualProgress({
+      doorKnocks: { completed: 0, target: 0 },
+      doorKnocksMade: { completed: 0, target: 0 },
+      doorKnockAnswers: { completed: 0, target: 0 },
+      doorKnockConnects: { completed: 0, target: 0 },
+      doorKnockDesktopAppraisals: { completed: 0, target: 0 },
+      doorKnockFaceToFaceAppraisals: { completed: 0, target: 0 },
+      phoneCalls: { completed: 0, target: 0 },
+      phoneCallConnects: { completed: 0, target: 0 },
+      phoneCallDesktopAppraisals: { completed: 0, target: 0 },
+      phoneCallFaceToFaceAppraisals: { completed: 0, target: 0 },
+    });
   };
 
   const viewPlan = async (plan: MarketingPlan) => {

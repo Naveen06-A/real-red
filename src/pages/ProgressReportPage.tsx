@@ -6,9 +6,8 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScal
 import { Bar } from 'react-chartjs-2';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { v4 as uuidv4 } from 'uuid';
+import { generatePdf } from '../utils/pdfUtils';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale, PointElement, LineElement);
 
@@ -254,9 +253,11 @@ export function ProgressReportPage() {
 
     const { data: activities, error } = await supabase
       .from('agent_activities')
-      .select('activity_type, street_name, suburb, knocks_made, calls_connected, calls_answered, desktop_appraisals, face_to_face_appraisals')
+      .select('activity_type, street_name, suburb, knocks_made, calls_connected, calls_answered, desktop_appraisals, face_to_face_appraisals, activity_date')
       .eq('agent_id', agentId)
-      .eq('suburb', plan.suburb.trim());
+      .eq('suburb', plan.suburb.trim())
+      .gte('activity_date', plan.start_date)
+      .lte('activity_date', plan.end_date);
 
     if (error) throw new Error(`Failed to fetch activities: ${error.message}`);
 
@@ -728,82 +729,111 @@ export function ProgressReportPage() {
   }, []);
 
   const generatePDF = useCallback(async (download: boolean = false) => {
-    if (!reportRef.current || (viewMode === 'suburb' && !selectedPlan)) return;
+    if (viewMode === 'suburb' && !selectedPlan) return;
 
-    const pdf = new jsPDF('l', 'mm', 'a4');
-    const pageWidth = 297;
-    const pageHeight = 210;
-    const margin = 10;
+    const head = [
+      [
+        'Suburb',
+        'Start Date',
+        'End Date',
+        'Street Name',
+        'Activity Type',
+        'Completed',
+        'Target',
+        'Progress (%)',
+        'Desktop Appraisals',
+        'Face-to-Face Appraisals',
+        'Reason',
+      ],
+    ];
+    const body: any[][] = [];
 
-    pdf.setFillColor(220, 234, 255);
-    pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(24);
-    pdf.setTextColor(31, 41, 55);
-    pdf.text('Marketing Progress Report', pageWidth / 2, 60, { align: 'center' });
-    pdf.setFontSize(16);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text(`Agent: ${profile?.name || 'Unknown'}`, pageWidth / 2, 80, { align: 'center' });
-    pdf.text(`Generated on: ${new Date().toLocaleDateString('en-AU')}`, pageWidth / 2, 90, { align: 'center' });
-    pdf.setFontSize(12);
-    pdf.setTextColor(107, 114, 128);
-    pdf.text('xAI Real Estate Platform', pageWidth / 2, pageHeight - 20, { align: 'center' });
+    if (viewMode === 'suburb' && selectedPlan) {
+      selectedPlan.door_knock_streets.forEach((street) => {
+        const progress = actualProgress.doorKnocks.streets.find((s) => s.name === street.name);
+        body.push([
+          selectedPlan.suburb,
+          formatDate(selectedPlan.start_date),
+          formatDate(selectedPlan.end_date),
+          street.name,
+          'Door Knock',
+          (progress?.completedKnocks || 0).toString(),
+          (progress?.targetKnocks || 0).toString(),
+          calculatePercentage(progress?.completedKnocks || 0, progress?.targetKnocks || 0).toString(),
+          (progress?.desktopAppraisals || 0).toString(),
+          (progress?.faceToFaceAppraisals || 0).toString(),
+          street.why || '',
+        ]);
+      });
 
-    pdf.addPage();
-    const canvas = await html2canvas(reportRef.current, { scale: 3 });
-    const imgData = canvas.toDataURL('image/png');
-    const imgWidth = pageWidth - 2 * margin;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    let heightLeft = imgHeight;
-    let position = margin;
+      selectedPlan.phone_call_streets.forEach((street) => {
+        const progress = actualProgress.phoneCalls.streets.find((s) => s.name === street.name);
+        body.push([
+          selectedPlan.suburb,
+          formatDate(selectedPlan.start_date),
+          formatDate(selectedPlan.end_date),
+          street.name,
+          'Phone Call',
+          (progress?.completedCalls || 0).toString(),
+          (progress?.targetCalls || 0).toString(),
+          calculatePercentage(progress?.completedCalls || 0, progress?.targetCalls || 0).toString(),
+          (progress?.desktopAppraisals || 0).toString(),
+          (progress?.faceToFaceAppraisals || 0).toString(),
+          street.why || '',
+        ]);
+      });
+    } else {
+      marketingPlans.forEach((plan) => {
+        const planProgress = planProgresses.find((p) => p.id === plan.id);
+        plan.door_knock_streets.forEach((street) => {
+          const progress = overallProgress.doorKnocks.streets.find((s) => s.name.includes(`${plan.suburb}: ${street.name}`));
+          body.push([
+            plan.suburb,
+            formatDate(plan.start_date),
+            formatDate(plan.end_date),
+            street.name,
+            'Door Knock',
+            (progress?.completedKnocks || 0).toString(),
+            (progress?.targetKnocks || 0).toString(),
+            calculatePercentage(progress?.completedKnocks || 0, progress?.targetKnocks || 0).toString(),
+            (progress?.desktopAppraisals || 0).toString(),
+            (progress?.faceToFaceAppraisals || 0).toString(),
+            street.why || '',
+          ]);
+        });
 
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(10);
-    pdf.setTextColor(107, 114, 128);
-    pdf.text('xAI Real Estate Platform', margin, pageHeight - 10);
-    pdf.text(`Page 1`, pageWidth - margin, pageHeight - 10, { align: 'right' });
-
-    pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-    heightLeft -= (pageHeight - 2 * margin);
-
-    let pageCount = 1;
-    while (heightLeft > 0) {
-      pdf.addPage();
-      pageCount++;
-      position = heightLeft - imgHeight + margin;
-      pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.setTextColor(107, 114, 128);
-      pdf.text('xAI Real Estate Platform', margin, pageHeight - 10);
-      pdf.text(`Page ${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
-      heightLeft -= (pageHeight - 2 * margin);
+        plan.phone_call_streets.forEach((street) => {
+          const progress = overallProgress.phoneCalls.streets.find((s) => s.name.includes(`${plan.suburb}: ${street.name}`));
+          body.push([
+            plan.suburb,
+            formatDate(plan.start_date),
+            formatDate(plan.end_date),
+            street.name,
+            'Phone Call',
+            (progress?.completedCalls || 0).toString(),
+            (progress?.targetCalls || 0).toString(),
+            calculatePercentage(progress?.completedCalls || 0, progress?.targetCalls || 0).toString(),
+            (progress?.desktopAppraisals || 0).toString(),
+            (progress?.faceToFaceAppraisals || 0).toString(),
+            street.why || '',
+          ]);
+        });
+      });
     }
 
-    pdf.addPage();
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(16);
-    pdf.setTextColor(31, 41, 55);
-    pdf.text('Appraisal Summary', margin, 20);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(12);
-    const progress = viewMode === 'suburb' ? actualProgress : overallProgress;
-    pdf.text(`Desktop Appraisals: ${progress.desktopAppraisals.completed}/${progress.desktopAppraisals.target}`, margin, 40);
-    pdf.text(`Face-to-Face Appraisals: ${progress.faceToFaceAppraisals.completed}/${progress.faceToFaceAppraisals.target}`, margin, 50);
-    pdf.setFontSize(10);
-    pdf.setTextColor(107, 114, 128);
-    pdf.text('xAI Real Estate Platform', margin, pageHeight - 10);
-    pdf.text(`Page ${pageCount + 1}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+    const fileName = `Progress_Report_${viewMode === 'suburb' && selectedPlan ? selectedPlan.suburb : 'Overall'}_${new Date().toISOString().split('T')[0]}.pdf`;
 
     if (download) {
-      pdf.save(`Progress_Report_${viewMode === 'suburb' && selectedPlan ? selectedPlan.suburb : 'Overall'}_${new Date().toISOString().split('T')[0]}.pdf`);
+      await generatePdf('Marketing Progress Report', head, body, fileName, 'save');
     } else {
-      const pdfBlob = pdf.output('blob');
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-      setPdfPreviewUrl(pdfUrl);
-      setShowPDFPreview(true);
+      const blob = await generatePdf('Marketing Progress Report', head, body, fileName, 'blob');
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        setPdfPreviewUrl(url);
+        setShowPDFPreview(true);
+      }
     }
-  }, [viewMode, selectedPlan, profile, actualProgress, overallProgress]);
+  }, [viewMode, selectedPlan, actualProgress, overallProgress, marketingPlans, planProgresses]);
 
   // Memoized progress metrics
   const getProgressMetrics = useMemo(() => {
@@ -1096,6 +1126,15 @@ export function ProgressReportPage() {
                 Preview PDF
               </motion.button>
               <motion.button
+                onClick={() => generatePDF(true)}
+                className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Download className="w-5 h-5 mr-2" />
+                Download PDF
+              </motion.button>
+              <motion.button
                 onClick={generateCSV}
                 className="flex items-center bg-teal-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-teal-700"
                 whileHover={{ scale: 1.05 }}
@@ -1233,13 +1272,13 @@ export function ProgressReportPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
             >
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.8, opacity: 0 }}
-                className="bg-white p-6 rounded-lg shadow-xl max-w-4xl w-full"
+                className="bg-white p-6 rounded-lg shadow-xl w-full h-full flex flex-col"
               >
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-gray-900">PDF Preview</h2>
@@ -1247,7 +1286,7 @@ export function ProgressReportPage() {
                     <X className="w-6 h-6" />
                   </button>
                 </div>
-                <iframe src={pdfPreviewUrl} className="w-full h-96 border" title="PDF Preview" />
+                <iframe src={pdfPreviewUrl} className="w-full flex-grow border" title="PDF Preview" />
                 <div className="flex gap-4 mt-4">
                   <button
                     onClick={() => generatePDF(true)}
