@@ -80,7 +80,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   const navigate = useNavigate();
   const {
     propertyMetrics,
-    filteredProperties = [],
+    filteredProperties: initialFilteredProperties = [],
     filters,
     filterSuggestions,
     manualInputs,
@@ -115,6 +115,14 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState<PropertyFormData | null>(null);
   const [formErrors, setFormErrors] = useState<Partial<PropertyFormData>>({});
+  const [filteredProperties, setFilteredProperties] = useState<PropertyDetails[]>(initialFilteredProperties);
+  const [dynamicFilterSuggestions, setDynamicFilterSuggestions] = useState({
+    suburbs: filterSuggestions?.suburbs || [],
+    streetNames: filterSuggestions?.streetNames || [],
+    streetNumbers: filterSuggestions?.streetNumbers || [],
+    agents: filterSuggestions?.agents || [],
+    agency_names: filterSuggestions?.agency_names || [],
+  });
 
   const propertiesTableRef = useRef<HTMLDivElement>(null);
 
@@ -125,6 +133,38 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   }, [filteredProperties, localCurrentPage]);
 
   const totalPages = Math.ceil((filteredProperties?.length || 0) / ITEMS_PER_PAGE);
+
+  const updateFilterSuggestions = (selectedSuburbs: string[]) => {
+    try {
+      const baseProperties = selectedSuburbs.length === 0
+        ? filteredProperties
+        : filteredProperties.filter((prop: PropertyDetails) =>
+            selectedSuburbs.some((suburb) => normalizeSuburb(prop.suburb || '') === normalizeSuburb(suburb))
+          );
+
+      const newSuggestions = {
+        suburbs: filterSuggestions?.suburbs || [],
+        streetNames: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.street_name || '').filter(Boolean))],
+        streetNumbers: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.street_number || '').filter(Boolean))],
+        agents: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.agent_name || '').filter(Boolean))],
+        agency_names: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.agency_name || 'Unknown').filter(Boolean))],
+      };
+
+      setDynamicFilterSuggestions(newSuggestions);
+
+      // Update local filters to only include values that are still valid
+      setLocalFilters((prev: Filters) => ({
+        ...prev,
+        streetNames: prev.streetNames.filter((name) => newSuggestions.streetNames.includes(name)),
+        streetNumbers: prev.streetNumbers.filter((num) => newSuggestions.streetNumbers.includes(num)),
+        agents: prev.agents.filter((agent) => newSuggestions.agents.includes(agent)),
+        agency_names: prev.agency_names.filter((agency) => newSuggestions.agency_names.includes(agency)),
+      }));
+    } catch (err) {
+      console.error('Error updating filter suggestions:', err);
+      toast.error('Failed to update filter suggestions');
+    }
+  };
 
   const handleEditClick = (property: PropertyDetails) => {
     setEditingProperty({
@@ -174,44 +214,54 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         return;
       }
 
+      const updatedProperty = {
+        street_number: editingProperty.street_number,
+        street_name: editingProperty.street_name,
+        suburb: editingProperty.suburb,
+        postcode: editingProperty.postcode,
+        agent_name: editingProperty.agent_name,
+        property_type: editingProperty.property_type,
+        price: editingProperty.price,
+        sold_price: editingProperty.sold_price,
+        category: editingProperty.category,
+        commission: editingProperty.commission,
+        agency_name: editingProperty.agency_name,
+        expected_price: editingProperty.expected_price,
+        sale_type: editingProperty.sale_type,
+        bedrooms: editingProperty.bedrooms,
+        bathrooms: editingProperty.bathrooms,
+        car_garage: editingProperty.car_garage,
+        sqm: editingProperty.sqm,
+        landsize: editingProperty.landsize,
+        listed_date: editingProperty.listed_date,
+        sold_date: editingProperty.sold_date,
+        flood_risk: editingProperty.flood_risk,
+        bushfire_risk: editingProperty.bushfire_risk,
+        contract_status: editingProperty.contract_status,
+        features: editingProperty.features,
+        updated_at: new Date().toISOString(),
+      };
+
       const { error } = await supabase
         .from('properties')
-        .update({
-          street_number: editingProperty.street_number,
-          street_name: editingProperty.street_name,
-          suburb: editingProperty.suburb,
-          postcode: editingProperty.postcode,
-          agent_name: editingProperty.agent_name,
-          property_type: editingProperty.property_type,
-          price: editingProperty.price,
-          sold_price: editingProperty.sold_price,
-          category: editingProperty.category,
-          commission: editingProperty.commission,
-          agency_name: editingProperty.agency_name,
-          expected_price: editingProperty.expected_price,
-          sale_type: editingProperty.sale_type,
-          bedrooms: editingProperty.bedrooms,
-          bathrooms: editingProperty.bathrooms,
-          car_garage: editingProperty.car_garage,
-          sqm: editingProperty.sqm,
-          landsize: editingProperty.landsize,
-          listed_date: editingProperty.listed_date,
-          sold_date: editingProperty.sold_date,
-          flood_risk: editingProperty.flood_risk,
-          bushfire_risk: editingProperty.bushfire_risk,
-          contract_status: editingProperty.contract_status,
-          features: editingProperty.features,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatedProperty)
         .eq('id', editingProperty.id);
 
       if (error) throw error;
+
+      // Update the filteredProperties state to reflect the edited property
+      setFilteredProperties((prev) =>
+        prev.map((prop) =>
+          prop.id === editingProperty.id
+            ? { ...prop, ...updatedProperty, commission_earned: calculateCommission(updatedProperty).commissionEarned }
+            : prop
+        )
+      );
 
       toast.success('Property updated successfully');
       setIsEditModalOpen(false);
       setEditingProperty(null);
       setFormErrors({});
-      navigate('/reports'); // Navigate back to refresh data
     } catch (err: any) {
       toast.error('Failed to update property');
       console.error('Update error:', err);
@@ -260,6 +310,9 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
       console.log(`Filter changed: ${filterType} =`, newValues);
       setLocalFilters((prev: Filters) => {
         const newFilters = { ...prev, [filterType]: newValues };
+        if (filterType === 'suburbs') {
+          updateFilterSuggestions(newValues);
+        }
         applyFilters(newFilters);
         localStorage.setItem('reportFilters', JSON.stringify(newFilters));
         return newFilters;
@@ -280,11 +333,14 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   ) => {
     if (e.key === 'Enter') {
       const value = localManualInputs[filterType].trim();
-      if (value && filterSuggestions[filterType]?.includes(value)) {
+      if (value && dynamicFilterSuggestions[filterType]?.includes(value)) {
         console.log(`Adding manual input for ${filterType}: ${value}`);
         setLocalFilters((prev: Filters) => {
           const newValues = [...new Set([...prev[filterType], value])];
           const newFilters: Filters = { ...prev, [filterType]: newValues };
+          if (filterType === 'suburbs') {
+            updateFilterSuggestions(newValues);
+          }
           applyFilters(newFilters);
           localStorage.setItem('reportFilters', JSON.stringify(newFilters));
           return newFilters;
@@ -305,6 +361,13 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
       setLocalManualInputs({ suburbs: '', streetNames: '', streetNumbers: '', agents: '', agency_names: '' });
       setExpandedFilters({ suburbs: false, streetNames: false, streetNumbers: false, agents: false, agency_names: false });
       setLocalFilterPreviewCount(filteredProperties.length);
+      setDynamicFilterSuggestions({
+        suburbs: filterSuggestions?.suburbs || [],
+        streetNames: filterSuggestions?.streetNames || [],
+        streetNumbers: filterSuggestions?.streetNumbers || [],
+        agents: filterSuggestions?.agents || [],
+        agency_names: filterSuggestions?.agency_names || [],
+      });
       localStorage.removeItem('reportFilters');
       toast.success('Filters reset successfully');
       setLocalCurrentPage(1);
@@ -332,8 +395,9 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         throw new Error(`Failed to delete property: ${error.message}`);
       }
 
+      // Update filteredProperties to remove the deleted property
+      setFilteredProperties((prev) => prev.filter((prop) => prop.id !== propertyId));
       toast.success('Property deleted successfully');
-      navigate('/reports');
     } catch (err: any) {
       console.error('Delete error:', err);
       toast.error(err.message || 'Failed to delete property');
@@ -764,7 +828,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                     />
                     <Select
                       isMulti
-                      options={filterSuggestions[filterType]?.map((item: string) => ({
+                      options={dynamicFilterSuggestions[filterType]?.map((item: string) => ({
                         value: item,
                         label: item,
                       })) || []}
