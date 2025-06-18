@@ -276,7 +276,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   const applyFilters = (newFilters: Filters) => {
     try {
       console.log('Applying filters:', newFilters);
-      const filtered = filteredProperties.filter((prop: PropertyDetails) => {
+      const filtered = initialFilteredProperties.filter((prop: PropertyDetails) => {
         const suburbMatch =
           newFilters.suburbs.length === 0 ||
           newFilters.suburbs.some((suburb: string) => normalizeSuburb(prop.suburb || '') === normalizeSuburb(suburb));
@@ -296,6 +296,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         return suburbMatch && streetNameMatch && streetNumberMatch && agentMatch && agencyMatch;
       });
       console.log('Filtered properties:', filtered.length);
+      setFilteredProperties(filtered); // Update the filteredProperties state
       setLocalFilterPreviewCount(filtered.length);
       setLocalCurrentPage(1);
     } catch (err) {
@@ -360,7 +361,8 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
       setLocalFilters(emptyFilters);
       setLocalManualInputs({ suburbs: '', streetNames: '', streetNumbers: '', agents: '', agency_names: '' });
       setExpandedFilters({ suburbs: false, streetNames: false, streetNumbers: false, agents: false, agency_names: false });
-      setLocalFilterPreviewCount(filteredProperties.length);
+      setFilteredProperties(initialFilteredProperties); // Reset to initial properties
+      setLocalFilterPreviewCount(initialFilteredProperties.length);
       setDynamicFilterSuggestions({
         suburbs: filterSuggestions?.suburbs || [],
         streetNames: filterSuggestions?.streetNames || [],
@@ -419,7 +421,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           'Features',
         ],
       ];
-      const body = propertyMetrics.propertyDetails.map((prop: PropertyDetails) => [
+      const body = filteredProperties.map((prop: PropertyDetails) => [
         prop.street_number || 'N/A',
         prop.street_name || 'N/A',
         normalizeSuburb(prop.suburb || ''),
@@ -476,7 +478,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           'Car Garage', 'SQM', 'Land Size', 'Listed Date', 'Sold Date', 'Flood Risk', 'Bushfire Risk', 'Contract Status',
           'Features',
         ],
-        ...propertyMetrics.propertyDetails.map((prop: PropertyDetails) => [
+        ...filteredProperties.map((prop: PropertyDetails) => [
           prop.street_number || 'N/A',
           prop.street_name || 'N/A',
           normalizeSuburb(prop.suburb || ''),
@@ -553,7 +555,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                   <th>Car Garage</th><th>SQM</th><th>Land Size</th><th>Listed Date</th><th>Sold Date</th>
                   <th>Flood Risk</th><th>Bushfire Risk</th><th>Contract Status</th><th>Features</th>
                 </tr>
-                ${propertyMetrics.propertyDetails
+                ${filteredProperties
                   .map(
                     (prop: PropertyDetails) => `
                   <tr>
