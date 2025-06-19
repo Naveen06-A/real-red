@@ -17,7 +17,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ChevronDown, Download, Filter, Loader2, RefreshCcw, Trash2, X, Edit, MapPin, Home, DollarSign, Percent, Briefcase, Calendar, Shield, CheckSquare, List, BarChart2, TrendingUp, FileText } from 'lucide-react';
 import moment from 'moment';
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Select from 'react-select';
@@ -44,7 +44,6 @@ ChartJS.register(
 const ITEMS_PER_PAGE = 10;
 
 interface PropertyReportPageProps {
-  // Define any additional props if needed
 }
 
 interface PropertyFormData {
@@ -113,6 +112,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     agency_names: false,
   });
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [editingProperty, setEditingProperty] = useState<PropertyFormData | null>(null);
   const [formErrors, setFormErrors] = useState<Partial<PropertyFormData>>({});
   const [filteredProperties, setFilteredProperties] = useState<PropertyDetails[]>(initialFilteredProperties);
@@ -125,6 +125,46 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   });
 
   const propertiesTableRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (filteredProperties.length === 0 && initialFilteredProperties.length > 0) {
+      setFilteredProperties(initialFilteredProperties);
+      setLocalFilterPreviewCount(initialFilteredProperties.length);
+    }
+  }, [initialFilteredProperties]);
+
+  useEffect(() => {
+    console.log('filteredProperties updated:', filteredProperties);
+  }, [filteredProperties]);
+
+  useEffect(() => {
+    console.log('localFilters updated:', localFilters);
+  }, [localFilters]);
+
+  useEffect(() => {
+    const subscription = supabase
+      .channel('properties-changes')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'properties' },
+        (payload) => {
+          const updatedProperty = payload.new as PropertyDetails;
+          console.log('Real-time update received:', updatedProperty);
+          setFilteredProperties((prev) =>
+            prev.map((prop) =>
+              prop.id === updatedProperty.id
+                ? { ...prop, ...updatedProperty, commission_earned: calculateCommission(updatedProperty).commissionEarned }
+                : prop
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const paginatedProperties = useMemo(() => {
     const start = (localCurrentPage - 1) * ITEMS_PER_PAGE;
@@ -152,7 +192,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
 
       setDynamicFilterSuggestions(newSuggestions);
 
-      // Update local filters to only include values that are still valid
       setLocalFilters((prev: Filters) => ({
         ...prev,
         streetNames: prev.streetNames.filter((name) => newSuggestions.streetNames.includes(name)),
@@ -199,8 +238,9 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingProperty) return;
+    if (!editingProperty || isUpdating) return;
 
+    setIsUpdating(true);
     try {
       const errors: Partial<PropertyFormData> = {};
       if (!editingProperty.street_name) errors.street_name = 'Street name is required';
@@ -211,23 +251,24 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
 
       if (Object.keys(errors).length > 0) {
         setFormErrors(errors);
+        setIsUpdating(false);
         return;
       }
 
       const updatedProperty = {
-        street_number: editingProperty.street_number,
+        street_number: editingProperty.street_number || null,
         street_name: editingProperty.street_name,
         suburb: editingProperty.suburb,
-        postcode: editingProperty.postcode,
-        agent_name: editingProperty.agent_name,
+        postcode: editingProperty.postcode || null,
+        agent_name: editingProperty.agent_name || null,
         property_type: editingProperty.property_type,
         price: editingProperty.price,
         sold_price: editingProperty.sold_price,
         category: editingProperty.category,
         commission: editingProperty.commission,
-        agency_name: editingProperty.agency_name,
+        agency_name: editingProperty.agency_name || null,
         expected_price: editingProperty.expected_price,
-        sale_type: editingProperty.sale_type,
+        sale_type: editingProperty.sale_type || null,
         bedrooms: editingProperty.bedrooms,
         bathrooms: editingProperty.bathrooms,
         car_garage: editingProperty.car_garage,
@@ -235,25 +276,38 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         landsize: editingProperty.landsize,
         listed_date: editingProperty.listed_date,
         sold_date: editingProperty.sold_date,
-        flood_risk: editingProperty.flood_risk,
-        bushfire_risk: editingProperty.bushfire_risk,
-        contract_status: editingProperty.contract_status,
-        features: editingProperty.features,
+        flood_risk: editingProperty.flood_risk || null,
+        bushfire_risk: editingProperty.bushfire_risk || null,
+        contract_status: editingProperty.contract_status || null,
+        features: editingProperty.features.length > 0 ? editingProperty.features : null,
         updated_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase
+      console.log('Updating property with payload:', updatedProperty);
+
+      const { data: updateData, error: updateError } = await supabase
         .from('properties')
         .update(updatedProperty)
-        .eq('id', editingProperty.id);
+        .eq('id', editingProperty.id)
+        .select('*')
+        .single();
 
-      if (error) throw error;
+      if (updateError) {
+        console.error('Supabase update error:', updateError);
+        throw new Error(`Failed to update property: ${updateError.message}`);
+      }
 
-      // Update the filteredProperties state to reflect the edited property
+      if (!updateData) {
+        console.error('No data returned from update operation');
+        throw new Error('Update operation did not return updated property');
+      }
+
+      console.log('Updated property from Supabase:', updateData);
+
       setFilteredProperties((prev) =>
         prev.map((prop) =>
           prop.id === editingProperty.id
-            ? { ...prop, ...updatedProperty, commission_earned: calculateCommission(updatedProperty).commissionEarned }
+            ? { ...prop, ...updateData, commission_earned: calculateCommission(updateData).commissionEarned }
             : prop
         )
       );
@@ -263,8 +317,10 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
       setEditingProperty(null);
       setFormErrors({});
     } catch (err: any) {
-      toast.error('Failed to update property');
       console.error('Update error:', err);
+      toast.error(err.message || 'Failed to update property');
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -273,10 +329,10 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     return <p className="text-red-600 text-center">Invalid property data</p>;
   }
 
-  const applyFilters = (newFilters: Filters) => {
+  const applyFilters = useCallback((newFilters: Filters) => {
     try {
       console.log('Applying filters:', newFilters);
-      const filtered = initialFilteredProperties.filter((prop: PropertyDetails) => {
+      const filtered = filteredProperties.filter((prop: PropertyDetails) => {
         const suburbMatch =
           newFilters.suburbs.length === 0 ||
           newFilters.suburbs.some((suburb: string) => normalizeSuburb(prop.suburb || '') === normalizeSuburb(suburb));
@@ -296,14 +352,14 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         return suburbMatch && streetNameMatch && streetNumberMatch && agentMatch && agencyMatch;
       });
       console.log('Filtered properties:', filtered.length);
-      setFilteredProperties(filtered); // Update the filteredProperties state
+      setFilteredProperties(filtered);
       setLocalFilterPreviewCount(filtered.length);
       setLocalCurrentPage(1);
     } catch (err) {
       console.error('Error applying filters:', err);
       toast.error('Failed to apply filters');
     }
-  };
+  }, [filteredProperties]);
 
   const handleFilterChange = (filterType: keyof Filters, selected: Array<{ value: string; label: string }>) => {
     try {
@@ -361,7 +417,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
       setLocalFilters(emptyFilters);
       setLocalManualInputs({ suburbs: '', streetNames: '', streetNumbers: '', agents: '', agency_names: '' });
       setExpandedFilters({ suburbs: false, streetNames: false, streetNumbers: false, agents: false, agency_names: false });
-      setFilteredProperties(initialFilteredProperties); // Reset to initial properties
+      setFilteredProperties(initialFilteredProperties);
       setLocalFilterPreviewCount(initialFilteredProperties.length);
       setDynamicFilterSuggestions({
         suburbs: filterSuggestions?.suburbs || [],
@@ -397,7 +453,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         throw new Error(`Failed to delete property: ${error.message}`);
       }
 
-      // Update filteredProperties to remove the deleted property
       setFilteredProperties((prev) => prev.filter((prop) => prop.id !== propertyId));
       toast.success('Property deleted successfully');
     } catch (err: any) {
@@ -1356,7 +1411,9 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
+                          disabled={isUpdating}
                         >
+                          {isUpdating ? <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" /> : null}
                           Save Changes
                         </motion.button>
                       </div>
@@ -1391,67 +1448,22 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
               {renderPriceTrends()}
             </motion.div>
             <motion.div
-              className="bg-white p-6 rounded-xl shadow-lg border border-blue-100 mb-6"
+              className="bg-white p-6 rounded-xl shadow-lg border border-blue-100"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
+              transition={{ duration: 0.5, delay: 0.6 }}
             >
+              <h3 className="text-xl font-semibold text-blue-800 mb-4 flex items-center">
+                <BarChart2 className="w-6 h-6 mr-2 text-blue-600" />
+                General Statistics
+              </h3>
               {renderGeneralCharts()}
             </motion.div>
-            <div className="flex justify-end space-x-4 relative">
-              {exportLoading && (
-                <motion.div
-                  className="absolute inset-0 flex items-center justify-center bg-blue-100 bg-opacity-50 rounded"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                >
-                  <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-                </motion.div>
-              )}
-              <motion.button
-                onClick={() => exportPropertyReportPDF()}
-                className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                title="Export property report as PDF"
-                aria-label="Export as PDF"
-                disabled={exportLoading}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                PDF
-              </motion.button>
-              <motion.button
-                onClick={() => exportPropertyReportCSV()}
-                className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                title="Export property report as CSV"
-                aria-label="Export as CSV"
-                disabled={exportLoading}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                CSV
-              </motion.button>
-              <motion.button
-                onClick={() => exportPropertyReportHTML()}
-                className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                title="Export property report as HTML"
-                aria-label="Export as HTML"
-                disabled={exportLoading}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                HTML
-              </motion.button>
-            </div>
           </>
         ) : (
-          <p className="text-gray-500 text-center py-4">No property metrics available.</p>
+          <p className="text-gray-500 text-center">No property metrics available.</p>
         )}
       </div>
     </div>
   );
 }
-
-export default PropertyReportPage;

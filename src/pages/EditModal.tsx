@@ -16,6 +16,8 @@ interface EditModalProps {
   setFilteredProperties: React.Dispatch<React.SetStateAction<PropertyDetails[]>>;
   debouncedGenerateMetrics: () => void;
   propertiesTableRef: React.RefObject<HTMLDivElement>;
+  pauseSubscription: () => void; // New prop to pause subscription
+  resumeSubscription: () => void; // New prop to resume subscription
 }
 
 // Utility function for deep comparison and diffing
@@ -42,6 +44,8 @@ export function EditModal({
   setFilteredProperties,
   debouncedGenerateMetrics,
   propertiesTableRef,
+  pauseSubscription,
+  resumeSubscription,
 }: EditModalProps) {
   const [formData, setFormData] = useState<Partial<PropertyDetails> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -114,11 +118,12 @@ export function EditModal({
       };
       setFormData(initialData);
       setAutoSaveDraft(initialData);
+      pauseSubscription(); // Pause subscription when modal opens
       logDebug(`Initialized formData: ${JSON.stringify(initialData, null, 2)}`);
     } else {
       resetModalState();
     }
-  }, [selectedProperty]);
+  }, [selectedProperty, pauseSubscription]);
 
   // Auto-save to localStorage
   useEffect(() => {
@@ -149,6 +154,7 @@ export function EditModal({
     if (formData?.price && formData.price < 0) errors.price = 'Price cannot be negative';
     if (formData?.sold_price && formData.sold_price < 0) errors.sold_price = 'Sold Price cannot be negative';
     if (formData?.commission && formData.commission < 0) errors.commission = 'Commission cannot be negative';
+    if (formData?.postcode && !/^\d{4}$/.test(formData.postcode)) errors.postcode = 'Postcode must be 4 digits';
     return errors;
   };
 
@@ -159,6 +165,7 @@ export function EditModal({
     if (selectedProperty) {
       localStorage.removeItem(`property_draft_${selectedProperty.id}`);
     }
+    resumeSubscription(); // Resume subscription when modal closes
     logDebug('Modal closed');
   };
 
@@ -288,7 +295,13 @@ export function EditModal({
           setSelectedProperty({ ...selectedProperty });
           logDebug('Reverted optimistic update due to error');
         }
+        logDebug(`Supabase error: ${error.message}`);
         throw new Error(`Supabase update failed: ${error.message}`);
+      }
+
+      if (!data || data.id !== selectedProperty.id) {
+        logDebug('Supabase returned invalid data');
+        throw new Error('Invalid response from server');
       }
 
       logDebug(`Supabase response: ${JSON.stringify(data, null, 2)}`);
@@ -403,13 +416,10 @@ export function EditModal({
   };
 
   const getSuggestions = (field: keyof PropertyDetails): (string | number)[] => {
-    // Exclude array fields
     const excludedFields = ['features', 'same_street_sales', 'past_records'];
     if (excludedFields.includes(field)) {
       return [];
     }
-
-    // Collect unique values, ensuring they are string or number
     const suggestions = new Set<string | number>();
     properties.forEach((p) => {
       const value = p[field];
@@ -417,7 +427,6 @@ export function EditModal({
         suggestions.add(value);
       }
     });
-
     return Array.from(suggestions).slice(0, 5);
   };
 
@@ -509,6 +518,7 @@ export function EditModal({
                         onClick={() => setShowDeleteConfirm(false)}
                         className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition"
                         disabled={loading}
+                        aria-label="Cancel deletion"
                       >
                         Cancel
                       </button>
@@ -516,6 +526,7 @@ export function EditModal({
                         onClick={handleDelete}
                         className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
                         disabled={loading}
+                        aria-label="Confirm deletion"
                       >
                         {loading ? 'Deleting...' : 'Delete'}
                       </button>
@@ -604,6 +615,8 @@ export function EditModal({
                 <button
                   onClick={() => toggleSection('address')}
                   className="w-full flex justify-between items-center py-3 text-lg font-semibold text-gray-800"
+                  aria-expanded={expandedSections.address}
+                  aria-controls="address-section"
                 >
                   <span>Address Details</span>
                   {expandedSections.address ? (
@@ -614,6 +627,7 @@ export function EditModal({
                 </button>
                 {expandedSections.address && (
                   <motion.div
+                    id="address-section"
                     className="space-y-4 pt-4 pb-6"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -663,6 +677,8 @@ export function EditModal({
                 <button
                   onClick={() => toggleSection('pricing')}
                   className="w-full flex justify-between items-center py-3 text-lg font-semibold text-gray-800"
+                  aria-expanded={expandedSections.pricing}
+                  aria-controls="pricing-section"
                 >
                   <span>Pricing Information</span>
                   {expandedSections.pricing ? (
@@ -673,6 +689,7 @@ export function EditModal({
                 </button>
                 {expandedSections.pricing && (
                   <motion.div
+                    id="pricing-section"
                     className="space-y-4 pt-4 pb-6"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -716,6 +733,8 @@ export function EditModal({
                 <button
                   onClick={() => toggleSection('details')}
                   className="w-full flex justify-between items-center py-3 text-lg font-semibold text-gray-800"
+                  aria-expanded={expandedSections.details}
+                  aria-controls="details-section"
                 >
                   <span>Property Details</span>
                   {expandedSections.details ? (
@@ -726,6 +745,7 @@ export function EditModal({
                 </button>
                 {expandedSections.details && (
                   <motion.div
+                    id="details-section"
                     className="space-y-4 pt-4 pb-6"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -765,9 +785,9 @@ export function EditModal({
                             aria-describedby={formErrors[field.name] ? `${field.name}-error` : undefined}
                           >
                             <option value="">Select Status</option>
-                            <option value="Listed">Listed</option>
-                            <option value="Sold">Sold</option>
-                            <option value="Pending">Pending</option>
+                            {Array.from(new Set(properties.map(p => p.category).filter(Boolean))).map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
                           </select>
                         ) : (
                           <input
@@ -814,6 +834,7 @@ export function EditModal({
                   disabled={loading}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
+                  aria-label="Cancel edit"
                 >
                   Cancel
                 </motion.button>
@@ -826,6 +847,7 @@ export function EditModal({
                   disabled={loading}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
+                  aria-label="Save and continue editing"
                 >
                   {loading ? (
                     <span className="flex items-center">
@@ -852,6 +874,7 @@ export function EditModal({
                   disabled={loading}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
+                  aria-label="Save and close"
                 >
                   {loading ? (
                     <span className="flex items-center">

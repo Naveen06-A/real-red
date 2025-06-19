@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Home } from './pages/Home';
-import  {PropertyForm } from './pages/PropertyForm';
+import { PropertyForm } from './pages/PropertyForm';
 import { PropertyList } from './pages/PropertyList';
 import { PropertyDetail } from './pages/PropertyDetail';
 import { Navigation } from './components/Navigation';
@@ -22,14 +22,14 @@ import { ActivityLogger } from './pages/ActivityLogger';
 import { ResetPassword } from './components/ResetPassword';
 import { ProgressReportPage } from './pages/ProgressReportPage';
 import { LoadingOverlay } from './components/LoadingOverlay';
-import { PropertyReportPage  } from './pages/PropertyReportPage';
-import CommissionByAgency from './pages/CommissionByAgency';
-import Comparisons from './pages/Comparisons';
-import AdminCommissionByAgency from './pages/AdminCommissionByAgency';
+import {PropertyReportPage}  from './pages/PropertyReportPage';
+import CommissionByAgency  from './pages/CommissionByAgency';
+import Comparisons  from './pages/Comparisons';
+import AdminCommissionByAgency  from './pages/AdminCommissionByAgency';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
-import {  AgentManagement} from './pages/AgentManagement';
-
+import { AgentManagement } from './pages/AgentManagement';
+// import { EditModal as PropertyReportPage } from './pages/PropertyReportPage';
 // PrivateRoute for general authenticated users
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
@@ -71,6 +71,7 @@ function RouteChangeTracker() {
 
 function App() {
   const { initializeAuth, loading: authLoading } = useAuthStore();
+  
   const [appLoading, setAppLoading] = useState(true);
 
   useEffect(() => {
@@ -95,7 +96,7 @@ function App() {
       isMounted = false;
       console.log('App cleanup');
     };
-  }, [initializeAuth]); // Stable dependency
+  }, [initializeAuth]);
 
   console.log('App render - authLoading:', authLoading, 'appLoading:', appLoading);
 
@@ -126,7 +127,7 @@ function App() {
             <Route path="/agent-dashboard/door-knocks" element={<AgentRoute><DoorKnocks /></AgentRoute>} />
             <Route path="/agent-dashboard/phone-calls" element={<AgentRoute><PhoneCalls /></AgentRoute>} />
             <Route path="/marketing-plan" element={<MarketingPlanPage />} />
-            <Route path='/property-report-page' element={<PropertyReportPage />}/>
+            <Route path="/property-report-page" element={<PropertyReportPage />} />
             <Route path="/activity-logger" element={<AgentRoute><ActivityLogger /></AgentRoute>} />
             <Route path="/reports" element={<AgentRoute><Reports /></AgentRoute>} />
             <Route path="/agent-properties" element={<PropertyList />} />
@@ -134,7 +135,6 @@ function App() {
             <Route path="/market-reports" element={<PrivateRoute><MarketReports /></PrivateRoute>} />
             <Route path="/property-prediction/:id" element={<PrivateRoute><PropertyPrediction /></PrivateRoute>} />
             <Route path="/property-form" element={<PropertyForm />} />
-
             <Route path="/comparisons" element={<AgentRoute><Comparisons /></AgentRoute>} />
             <Route
               path="/commission-by-agency"
@@ -150,4 +150,5 @@ function App() {
     </BrowserRouter>
   );
 }
+
 export default App;
