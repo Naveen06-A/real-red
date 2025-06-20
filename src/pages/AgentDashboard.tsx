@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Mic, Clock, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car } from 'lucide-react';
+import { Mic, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car } from 'lucide-react';
 import { IndividualPropertyReport } from './IndividualPropertyReport';
 import { supabase } from '../lib/supabase';
 import jsPDF from 'jspdf';
@@ -21,11 +21,12 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
+import { normalizeSuburb } from '../utils/subrubUtils'; // Import normalizeSuburb
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 interface PredictionResult {
-  recommendation: 'BUY' | 'SELL';
+  recommendation: 'BUY' | 'SOLD';
   confidence: number;
   trend: number;
   historicalData: { dates: string[]; prices: number[] };
@@ -38,8 +39,7 @@ interface SuburbProgress {
   totalProperties: number;
   listedProperties: number;
   soldProperties: number;
-  avgDaysOnMarket: number;
-  conversionRate: number;
+  unknownCategoryCount?: number; // Track properties with invalid/null categories
 }
 
 interface Filters {
@@ -51,8 +51,7 @@ interface Filters {
   suburbs: string[];
   propertyTypes: string[];
   street_name: string;
-  category: string;
-  [key: string]: string | string[];
+  categories: string[];
 }
 
 const ALLOWED_SUBURBS = [
@@ -92,7 +91,7 @@ export function AgentDashboard() {
     suburbs: [],
     propertyTypes: [],
     street_name: '',
-    category: '',
+    categories: [],
   });
 
   useEffect(() => {
@@ -107,7 +106,7 @@ export function AgentDashboard() {
   useEffect(() => {
     console.log('Filters changed:', { filters, searchQuery });
     applyFiltersAndSearch();
-  }, [filters, searchQuery]); // Added searchQuery to dependencies
+  }, [filters, searchQuery]);
 
   const fetchPropertiesAndPredict = async () => {
     setLoading(true);
@@ -150,40 +149,55 @@ export function AgentDashboard() {
   const fetchSuburbProgress = async () => {
     try {
       const progressPromises = ALLOWED_SUBURBS.map(async (suburb) => {
+        const normalizedSuburbName = normalizeSuburb(suburb.name);
         const { data: properties, error } = await supabase
           .from('properties')
-          .select('id, category, listed_date, sold_date')
-          .eq('suburb', suburb.name);
+          .select('id, category, suburb')
+          .ilike('suburb', normalizedSuburbName); // Case-insensitive suburb match
+
         if (error) throw error;
 
+        console.log(`Raw properties for ${normalizedSuburbName}:`, properties); // Debug log
+
         const totalProperties = properties?.length || 0;
-        const listedProperties = properties?.filter(p => p.category === 'Listing').length || 0;
-        const soldProperties = properties?.filter(p => p.category === 'Sold').length || 0;
+        let listedProperties = 0;
+        let soldProperties = 0;
+        let unknownCategoryCount = 0;
 
-        const avgDaysOnMarket = properties
-          ?.filter(p => p.sold_date && p.listed_date)
-          .map(p => {
-            const listed = new Date(p.listed_date);
-            const sold = new Date(p.sold_date);
-            return (sold.getTime() - listed.getTime()) / (1000 * 60 * 60 * 24);
-          })
-          .reduce((sum, days) => sum + days, 0) / (soldProperties || 1) || 0;
+        properties?.forEach((p) => {
+          const category = (p.category || '').toLowerCase();
+          if (category === 'listing') {
+            listedProperties += 1;
+          } else if (category === 'sold') {
+            soldProperties += 1;
+          } else {
+            unknownCategoryCount += 1;
+            console.warn(`Property ID ${p.id} in ${normalizedSuburbName} has invalid category: ${p.category}`);
+          }
+        });
 
-        const result = {
-          suburb: suburb.name,
+        const progress: SuburbProgress = {
+          suburb: normalizedSuburbName,
           totalProperties,
           listedProperties,
           soldProperties,
-          avgDaysOnMarket: Math.round(avgDaysOnMarket),
-          conversionRate: totalProperties ? (soldProperties / totalProperties) * 100 : 0,
+          unknownCategoryCount,
         };
-        console.log(`Progress for ${suburb.name}:`, result);
-        return result;
+
+        console.log(`Progress for ${normalizedSuburbName}:`, progress); // Debug log
+
+        return progress;
       });
 
       const progressData = await Promise.all(progressPromises);
       console.log('All suburb progress data:', progressData);
       setSuburbProgress(progressData.filter(p => p.totalProperties > 0));
+
+      // Warn if there are properties with unknown categories
+      const totalUnknown = progressData.reduce((sum, p) => sum + (p.unknownCategoryCount || 0), 0);
+      if (totalUnknown > 0) {
+        toast.warn(`${totalUnknown} properties have invalid or missing categories. Check console for details.`);
+      }
     } catch (error) {
       console.error('Error fetching suburb progress:', error);
       toast.error('Failed to fetch suburb progress data');
@@ -246,7 +260,7 @@ export function AgentDashboard() {
       const firstPrice = prices[0];
       const slope = ((lastPrice - firstPrice) / firstPrice) * 100;
       const marketCondition: PredictionResult['marketCondition'] = slope > 3 ? 'Rising' : slope < -3 ? 'Declining' : 'Stable';
-      const recommendation: 'BUY' | 'SELL' = slope >= 0 ? 'BUY' : 'SELL';
+      const recommendation: 'BUY' | 'SOLD' = slope >= 0 ? 'BUY' : 'SOLD';
       return {
         recommendation,
         confidence: Math.min(Math.abs(slope) * 2, 95),
@@ -324,9 +338,9 @@ export function AgentDashboard() {
       let queryBuilder = supabase.from('properties').select('*');
 
       // Apply category filter only if explicitly set
-      if (filters.category && filters.category !== '') {
-        console.log('Filtering by category (eq):', filters.category);
-        queryBuilder = queryBuilder.eq('category', filters.category);
+      if (filters.categories.length > 0) {
+        console.log('Filtering by categories (in):', filters.categories);
+        queryBuilder = queryBuilder.in('category', filters.categories.map(c => c.toLowerCase()));
       } else {
         console.log('No category filter applied, fetching all properties');
       }
@@ -344,7 +358,7 @@ export function AgentDashboard() {
       if (filters.car_garage) queryBuilder = queryBuilder.gte('car_garage', parseInt(filters.car_garage) || 0);
       if (filters.square_feet) queryBuilder = queryBuilder.gte('square_feet', parseInt(filters.square_feet) || 0);
       if (filters.price) queryBuilder = queryBuilder.lte('price', parseInt(filters.price) || 0);
-      if (filters.suburbs.length > 0) queryBuilder = queryBuilder.in('suburb', filters.suburbs);
+      if (filters.suburbs.length > 0) queryBuilder = queryBuilder.in('suburb', filters.suburbs.map(normalizeSuburb));
       if (filters.propertyTypes.length > 0) queryBuilder = queryBuilder.in('property_type', filters.propertyTypes);
       if (filters.street_name) queryBuilder = queryBuilder.ilike('street_name', `%${filters.street_name}%`);
 
@@ -390,7 +404,7 @@ export function AgentDashboard() {
     if (filters.suburbs.length > 0) count++;
     if (filters.propertyTypes.length > 0) count++;
     if (filters.street_name) count++;
-    if (filters.category && filters.category !== '') count++; // Only count non-empty category
+    if (filters.categories.length > 0) count++;
     return count;
   };
 
@@ -406,18 +420,19 @@ export function AgentDashboard() {
       suburbs: [],
       propertyTypes: [],
       street_name: '',
-      category: '',
+      categories: [],
     });
-    // Explicitly trigger a fetch with no filters
     applyFiltersAndSearch('');
   };
 
   const handleCategoryClick = (category: string) => {
     console.log('Category clicked:', category);
-    setFilters((prev) => ({
-      ...prev,
-      category: prev.category === category ? '' : category,
-    }));
+    setFilters((prev) => {
+      const newCategories = prev.categories.includes(category)
+        ? prev.categories.filter((c) => c !== category)
+        : [...prev.categories, category];
+      return { ...prev, categories: newCategories };
+    });
   };
 
   const generateReport = () => {
@@ -450,10 +465,13 @@ export function AgentDashboard() {
     yPos += 20;
     suburbProgress.forEach((progress) => {
       doc.text(`${progress.suburb}:`, 20, yPos);
-      doc.text(`Listed: ${progress.listedProperties}/${progress.totalProperties} (${(progress.listedProperties/progress.totalProperties*100).toFixed(1)}%)`, 40, yPos + 5);
-      doc.text(`Conversion Rate: ${progress.conversionRate.toFixed(1)}%`, 40, yPos + 10);
-      doc.text(`Avg Days on Market: ${progress.avgDaysOnMarket}`, 40, yPos + 15);
-      yPos += 25;
+      doc.text(`Listed Properties: ${progress.listedProperties}`, 40, yPos + 5);
+      doc.text(`Sold Properties: ${progress.soldProperties}`, 40, yPos + 10);
+      if (progress.unknownCategoryCount && progress.unknownCategoryCount > 0) {
+        doc.text(`Unknown Category: ${progress.unknownCategoryCount}`, 40, yPos + 15);
+        yPos += 5;
+      }
+      yPos += 20;
     });
 
     doc.setFontSize(14);
@@ -462,22 +480,23 @@ export function AgentDashboard() {
     yPos += 20;
     const avgPrice = properties.reduce((sum, p) => sum + (p.price || 0), 0) / properties.length || 0;
     doc.text(`Total Properties: ${properties.length}`, 20, yPos);
-    doc.text(`Average Price: ${formatCurrency(avgPrice)}`, 20, yPos + 10);
+    doc.text(`Sold Properties: ${properties.filter(p => p.category?.toLowerCase() === 'sold').length}`, 20, yPos + 10);
+    doc.text(`Average Price: ${formatCurrency(avgPrice)}`, 20, yPos + 20);
 
-    yPos += 20;
+    yPos += 30;
     const tableData = properties.map((p) => [
       p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A',
-      p.suburb || 'N/A',
+      normalizeSuburb(p.suburb || 'N/A'),
       p.street_name || 'N/A',
       p.bedrooms ?? 'N/A',
       p.bathrooms ?? 'N/A',
       p.car_garage ?? 'N/A',
       p.price ? formatCurrency(p.price) : 'N/A',
       p.agent_name || 'N/A',
-      predictions[p.id]?.recommendation || 'N/A',
+      p.category || 'N/A',
     ]);
     (doc as any).autoTable({
-      head: [['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Recommendation']],
+      head: [['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status']],
       body: tableData,
       startY: yPos,
       styles: { fontSize: 8 },
@@ -487,17 +506,17 @@ export function AgentDashboard() {
   };
 
   const exportToCSV = () => {
-    const headers = ['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Recommendation'];
+    const headers = ['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status'];
     const rows = properties.map((p) => [
       `"${p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A'}"`,
-      `"${p.suburb || 'N/A'}"`,
+      `"${normalizeSuburb(p.suburb || 'N/A')}"`,
       `"${p.street_name || 'N/A'}"`,
       p.bedrooms ?? 'N/A',
       p.bathrooms ?? 'N/A',
       p.car_garage ?? 'N/A',
       p.price ? formatCurrency(p.price) : 'N/A',
       `"${p.agent_name || 'N/A'}"`,
-      `"${predictions[p.id]?.recommendation || 'N/A'}"`,
+      `"${p.category || 'N/A'}"`,
     ]);
     const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -513,17 +532,17 @@ export function AgentDashboard() {
     labels: suburbProgress.map(p => p.suburb),
     datasets: [
       {
-        label: 'Listing Progress (%)',
-        data: suburbProgress.map(p => Number(((p.listedProperties / (p.totalProperties || 1)) * 100).toFixed(1))),
+        label: 'Listed Properties',
+        data: suburbProgress.map(p => p.listedProperties),
         backgroundColor: 'rgba(59, 130, 246, 0.6)',
         borderColor: 'rgb(59, 130, 246)',
         borderWidth: 1,
       },
       {
-        label: 'Conversion Rate (%)',
-        data: suburbProgress.map(p => Number(p.conversionRate.toFixed(1))),
-        backgroundColor: 'rgba(16, 185, 129, 0.6)',
-        borderColor: 'rgb(16, 185, 129)',
+        label: 'Sold Properties',
+        data: suburbProgress.map(p => p.soldProperties),
+        backgroundColor: 'rgba(239, 68, 68, 0.6)',
+        borderColor: 'rgb(239, 68, 68)',
         borderWidth: 1,
       },
     ],
@@ -531,17 +550,17 @@ export function AgentDashboard() {
     labels: ['No Data'],
     datasets: [
       {
-        label: 'Listing Progress (%)',
+        label: 'Listed Properties',
         data: [0],
         backgroundColor: 'rgba(59, 130, 246, 0.6)',
         borderColor: 'rgb(59, 130, 246)',
         borderWidth: 1,
       },
       {
-        label: 'Conversion Rate (%)',
+        label: 'Sold Properties',
         data: [0],
-        backgroundColor: 'rgba(16, 185, 129, 0.6)',
-        borderColor: 'rgb(16, 185, 129)',
+        backgroundColor: 'rgba(239, 68, 68, 0.6)',
+        borderColor: 'rgb(239, 68, 68)',
         borderWidth: 1,
       },
     ],
@@ -561,7 +580,7 @@ export function AgentDashboard() {
       },
       title: {
         display: true,
-        text: 'Suburb Progress Overview',
+        text: 'Suburb Property Status',
         font: { size: 16 },
         color: '#1F2937',
         padding: { top: 10, bottom: 10 },
@@ -572,7 +591,7 @@ export function AgentDashboard() {
         titleFont: { size: 12 },
         bodyFont: { size: 12 },
         callbacks: {
-          label: (context: any) => `${context.dataset.label}: ${context.parsed.y}%`,
+          label: (context: any) => `${context.dataset.label}: ${context.parsed.y}`,
         },
       },
     },
@@ -589,13 +608,12 @@ export function AgentDashboard() {
       },
       y: {
         beginAtZero: true,
-        max: 100,
         ticks: {
           color: '#1F2937',
-          stepSize: 20,
+          stepSize: 1,
           callback: (tickValue: string | number) => {
             const value = typeof tickValue === 'string' ? parseFloat(tickValue) : tickValue;
-            return Number.isFinite(value) ? `${value}%` : '';
+            return Number.isFinite(value) ? `${value}` : '';
           },
         },
         grid: {
@@ -633,8 +651,7 @@ export function AgentDashboard() {
   const marketInsights = {
     totalProperties: properties.length,
     avgPrice: properties.reduce((sum, p) => sum + (p.price || 0), 0) / properties.length || 0,
-    buyCount: properties.filter((p) => predictions[p.id]?.recommendation === 'BUY').length,
-    sellCount: properties.filter((p) => predictions[p.id]?.recommendation === 'SELL').length,
+    soldCount: properties.filter((p) => p.category?.toLowerCase() === 'sold').length,
   };
 
   return (
@@ -680,8 +697,8 @@ export function AgentDashboard() {
         <div>
           <h3 className="text-lg font-semibold text-gray-800">Market Insights</h3>
           <p className="text-sm text-gray-600">Total Properties: {marketInsights.totalProperties}</p>
+          <p className="text-sm text-gray-600">Sold Properties: {marketInsights.soldCount}</p>
           <p className="text-sm text-gray-600">Avg Price: {formatCurrency(marketInsights.avgPrice)}</p>
-          <p className="text-sm text-green-600">BUY: {marketInsights.buyCount} | SELL: {marketInsights.sellCount}</p>
         </div>
       </div>
 
@@ -697,35 +714,45 @@ export function AgentDashboard() {
             >
               <option value="">Select a suburb</option>
               {ALLOWED_SUBURBS.map(suburb => (
-                <option key={suburb.name} value={suburb.name}>{suburb.name}</option>
+                <option key={suburb.name} value={suburb.name}>{normalizeSuburb(suburb.name)}</option>
               ))}
             </select>
           </div>
 
           {suburbProgress.length === 0 ? (
             <div className="text-center py-4 text-gray-600">
-              No suburb progress data available. Please try refreshing or check your data source.
+              No suburb progress data available. Please check your data source or refresh.
             </div>
           ) : (
-            <div className="mb-6" style={{ height: '300px', position: 'relative' }}>
-              <Bar data={chartData} options={chartOptions} />
-            </div>
+            <>
+              <div className="mb-6" style={{ height: '300px', position: 'relative' }}>
+                <Bar data={chartData} options={chartOptions} />
+              </div>
+              {suburbProgress.some(p => p.unknownCategoryCount && p.unknownCategoryCount > 0) && (
+                <div className="bg-yellow-50 p-4 rounded-lg mb-4">
+                  <p className="text-yellow-700 text-sm">
+                    Warning: Some properties have invalid or missing categories, which may affect counts. Check console logs for details.
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
-          {selectedSuburb && suburbProgress.find(p => p.suburb === selectedSuburb) && (
+          {selectedSuburb && suburbProgress.find(p => p.suburb === normalizeSuburb(selectedSuburb)) && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
-              className="grid grid-cols-1 md:grid-cols-3 gap-4"
+              className="grid grid-cols-1 md:grid-cols-2 gap-4"
             >
               {(() => {
-                const progress = suburbProgress.find(p => p.suburb === selectedSuburb);
+                const progress = suburbProgress.find(p => p.suburb === normalizeSuburb(selectedSuburb));
                 if (!progress) return null;
                 return (
                   <>
                     <div className="bg-gray-50 p-4 rounded-lg">
-                      <h3 className="text-lg font-semibold">Listing Progress</h3>
+                      <h3 className="text-lg font-semibold text-gray-800">Listed Properties</h3>
+                      <p className="text-2xl font-bold text-blue-600">{progress.listedProperties}</p>
                       <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
                         <div
                           className="bg-blue-600 h-2.5 rounded-full"
@@ -733,24 +760,30 @@ export function AgentDashboard() {
                         ></div>
                       </div>
                       <p className="text-sm text-gray-600 mt-2">
-                        {progress.listedProperties}/{progress.totalProperties} ({((progress.listedProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
+                        {progress.listedProperties} of {progress.totalProperties} ({((progress.listedProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
                       </p>
                     </div>
                     <div className="bg-gray-50 p-4 rounded-lg">
-                      <h3 className="text-lg font-semibold">Conversion Rate</h3>
+                      <h3 className="text-lg font-semibold text-gray-800">Sold Properties</h3>
+                      <p className="text-2xl font-bold text-red-600">{progress.soldProperties}</p>
                       <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
                         <div
-                          className="bg-green-600 h-2.5 rounded-full"
-                          style={{ width: `${progress.conversionRate}%` }}
+                          className="bg-red-600 h-2.5 rounded-full"
+                          style={{ width: `${(progress.soldProperties / (progress.totalProperties || 1)) * 100}%` }}
                         ></div>
                       </div>
-                      <p className="text-sm text-gray-600 mt-2">{progress.conversionRate.toFixed(1)}%</p>
+                      <p className="text-sm text-gray-600 mt-2">
+                        {progress.soldProperties} of {progress.totalProperties} ({((progress.soldProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
+                      </p>
                     </div>
-                    <div className="bg-gray-50 p-4 rounded-lg">
-                      <h3 className="text-lg font-semibold">Avg Days on Market</h3>
-                      <p className="text-2xl font-bold text-blue-600">{progress.avgDaysOnMarket}</p>
-                      <p className="text-sm text-gray-600">days</p>
-                    </div>
+                    {progress.unknownCategoryCount && progress.unknownCategoryCount > 0 && (
+                      <div className="bg-yellow-50 p-4 rounded-lg col-span-2">
+                        <h3 className="text-lg font-semibold text-gray-800">Data Issue</h3>
+                        <p className="text-sm text-yellow-700">
+                          {progress.unknownCategoryCount} properties in {progress.suburb} have invalid or missing categories. Please update the database.
+                        </p>
+                      </div>
+                    )}
                   </>
                 );
               })()}
@@ -939,7 +972,7 @@ export function AgentDashboard() {
                 >
                   {ALLOWED_SUBURBS.map((suburb) => (
                     <option key={`${suburb.name}-${suburb.postcode}`} value={suburb.name}>
-                      {`${suburb.name} ${suburb.postcode}`}
+                      {`${normalizeSuburb(suburb.name)} ${suburb.postcode}`}
                     </option>
                   ))}
                 </select>
@@ -993,6 +1026,27 @@ export function AgentDashboard() {
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  multiple
+                  value={filters.categories}
+                  onChange={(e) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      categories: Array.from(e.target.selectedOptions).map((option) => option.value),
+                    }))
+                  }
+                  className="w-full p-2 border rounded h-24"
+                >
+                  {['Listing', 'Sold'].map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <button
                   onClick={() => applyFiltersAndSearch()}
                   className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700"
@@ -1005,27 +1059,24 @@ export function AgentDashboard() {
         )}
 
         <div className="flex gap-4 mb-4">
+          {['Listing', 'Sold'].map((category) => (
+            <button
+              key={category}
+              onClick={() => handleCategoryClick(category)}
+              className={`px-4 py-2 rounded-lg ${
+                filters.categories.includes(category)
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 hover:bg-gray-300'
+              }`}
+            >
+              {category}
+            </button>
+          ))}
           <button
-            onClick={() => handleCategoryClick('Listing')}
-            className={`px-4 py-2 rounded-lg ${filters.category === 'Listing' ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-          >
-            Listings
-          </button>
-          <button
-            onClick={() => handleCategoryClick('Sold')}
-            className={`px-4 py-2 rounded-lg ${filters.category === 'Sold' ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-          >
-            Sold
-          </button>
-          <button
-            onClick={() => handleCategoryClick('Under Offer')}
-            className={`px-4 py-2 rounded-lg ${filters.category === 'Under Offer' ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-          >
-            Under Offer
-          </button>
-          <button
-            onClick={() => handleCategoryClick('')}
-            className={`px-4 py-2 rounded-lg ${filters.category === '' ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+            onClick={() => setFilters((prev) => ({ ...prev, categories: [] }))}
+            className={`px-4 py-2 rounded-lg ${
+              filters.categories.length === 0 ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
+            }`}
           >
             All
           </button>
@@ -1049,8 +1100,8 @@ export function AgentDashboard() {
 
       <div className="mt-8">
         <h2 className="text-2xl font-semibold text-gray-800 mb-4">Properties ({properties.length})</h2>
-        {filters.category && filters.category !== '' && (
-          <p className="text-gray-600 mb-4">Showing {filters.category} properties</p>
+        {filters.categories.length > 0 && (
+          <p className="text-gray-600 mb-4">Showing {filters.categories.join(', ')} properties</p>
         )}
 
         {properties.length === 0 ? (
@@ -1079,26 +1130,22 @@ export function AgentDashboard() {
                       ? `${property.street_number} ${property.street_name}`
                       : property.address || 'Unknown Address'}
                   </h3>
-                  <div className="relative group/badge">
-                    <span
-                      className={`px-3 py-1 text-sm font-medium rounded-full ${
-                        predictions[property.id]?.recommendation === 'BUY'
-                          ? 'bg-green-200 text-green-800'
-                          : 'bg-red-200 text-red-800'
-                      }`}
-                    >
-                      {predictions[property.id]?.recommendation || 'N/A'}
-                    </span>
-                    <span className="absolute hidden group-hover/badge:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                      Confidence: {predictions[property.id]?.confidence?.toFixed(2) || 'N/A'}%
-                    </span>
-                  </div>
+                  <span
+                    className={`px-3 py-1 text-sm font-medium rounded-full ${
+                      property.category?.toLowerCase() === 'sold'
+                        ? 'bg-red-200 text-red-800'
+                        : property.category?.toLowerCase() === 'listing'
+                        ? 'bg-blue-200 text-blue-800'
+                        : 'bg-gray-200 text-gray-800'
+                    }`}
+                  >
+                    {property.category || 'N/A'}
+                  </span>
                 </div>
                 <p className="text-gray-600 font-medium">
-                  {property.suburb || 'Unknown Suburb'}
+                  {normalizeSuburb(property.suburb || 'Unknown Suburb')}
                 </p>
                 <p className="text-gray-600">Type: {property.property_type || 'Unknown'}</p>
-                <p className="text-gray-600">Category: {property.category || 'Unknown'}</p>
                 <div className="flex items-center text-gray-600 space-x-4 mt-2">
                   <div className="flex items-center">
                     <Home className="w-4 h-4 mr-1" />

@@ -1,4 +1,3 @@
-
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import {
@@ -57,6 +56,8 @@ interface CommissionSummary {
 interface AgencyTotal {
   agency: string;
   totalCommission: number;
+  listedCommission: number; // Added for listed properties commission
+  soldCommission: number; // Added for sold properties commission
   propertyCount: number;
   listedCount: number;
   soldCount: number;
@@ -580,9 +581,22 @@ function CommissionByAgency() {
     return Object.entries(internalCommissionData)
       .map(([agency, types]) => {
         const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === agency);
+        const listedCommission = properties.reduce((sum, p) => {
+          const { commissionEarned } = calculateCommission(p, agentCommissions);
+          return sum + commissionEarned;
+        }, 0);
+        const soldCommission = properties
+          .filter((p) => p.contract_status === 'sold' || !!p.sold_date)
+          .reduce((sum, p) => {
+            const { commissionEarned } = calculateCommission(p, agentCommissions);
+            return sum + commissionEarned;
+          }, 0);
+
         return {
           agency,
           totalCommission: Object.values(types).reduce((sum, val) => sum + val, 0),
+          listedCommission,
+          soldCommission,
           propertyCount: summary.agencyPropertyCounts[agency] || 0,
           listedCount: properties.length,
           soldCount: properties.filter((p) => p.contract_status === 'sold' || !!p.sold_date).length,
@@ -591,7 +605,7 @@ function CommissionByAgency() {
         };
       })
       .sort((a, b) => b.totalCommission - a.totalCommission);
-  }, [internalCommissionData, internalProperties, summary.agencyPropertyCounts, internalAgentData]);
+  }, [internalCommissionData, internalProperties, summary.agencyPropertyCounts, internalAgentData, agentCommissions]);
 
   const ourAgency = useMemo(() => agencyTotals.find((a) => a.agency === ourAgencyName), [agencyTotals, ourAgencyName]);
   const ourAgent = useMemo(() => {
@@ -736,7 +750,7 @@ function CommissionByAgency() {
     });
 
     doc.autoTable({
-      head: [['Agency', 'Commission Rate', 'Total Commission', 'Listed', 'Sold', 'Suburbs']],
+      head: [['Agency', 'Commission Rate', 'Total Commission', 'Listed Commission', 'Sold Commission', 'Total Properties', 'Listed', 'Sold', 'Suburbs']],
       body: agencyTotals.map((row) => {
         const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
         const commissionRate = properties.length > 0 ? properties[0].commission || 0 : 0;
@@ -744,6 +758,9 @@ function CommissionByAgency() {
           row.agency,
           `${commissionRate}%`,
           formatCurrency(row.totalCommission),
+          formatCurrency(row.listedCommission),
+          formatCurrency(row.soldCommission),
+          row.propertyCount.toString(),
           row.listedCount.toString(),
           row.soldCount.toString(),
           row.suburbs.join(', ') || 'None',
@@ -778,7 +795,7 @@ function CommissionByAgency() {
   const exportCommissionCSV = () => {
     const data = [
       ['Commission Performance Report'],
-      [`Generated on: ${new Date().toLocaleString()}`],
+      [`Generated on: ${new Date().toLocaleString()}`, '', '', '', '', '', '', ''],
       ['Harcourts Success'],
       [],
       ['Summary'],
@@ -792,7 +809,7 @@ function CommissionByAgency() {
       ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission || 0)})` : 'N/A'],
       [],
       ['Agency Totals'],
-      ['Agency', 'Commission Rate', 'Total Commission', 'Listed', 'Sold', 'Suburbs'],
+      ['Agency', 'Commission Rate', 'Total Commission', 'Listed Commission', 'Sold Commission', 'Total Properties', 'Listed', 'Sold', 'Suburbs'],
       ...agencyTotals.map((row) => {
         const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
         const commissionRate = properties.length > 0 ? properties[0].commission || 0 : 0;
@@ -800,6 +817,9 @@ function CommissionByAgency() {
           row.agency,
           `${commissionRate}%`,
           formatCurrency(row.totalCommission),
+          formatCurrency(row.listedCommission),
+          formatCurrency(row.soldCommission),
+          row.propertyCount.toString(),
           row.listedCount.toString(),
           row.soldCount.toString(),
           row.suburbs.join(', ') || 'None',
@@ -1094,6 +1114,9 @@ function CommissionByAgency() {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Commission</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Listed Commission</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sold Commission</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Properties</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Listed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sold</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Suburbs</th>
@@ -1119,6 +1142,9 @@ function CommissionByAgency() {
                       {row.agency === ourAgencyName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.totalCommission)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.listedCommission)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.soldCommission)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.propertyCount}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.listedCount}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.soldCount}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">{row.suburbs.join(', ') || 'None'}</td>
