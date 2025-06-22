@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { Mic, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car } from 'lucide-react';
@@ -21,7 +21,6 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
-import { normalizeSuburb } from '../utils/subrubUtils'; // Import normalizeSuburb
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -39,7 +38,8 @@ interface SuburbProgress {
   totalProperties: number;
   listedProperties: number;
   soldProperties: number;
-  unknownCategoryCount?: number; // Track properties with invalid/null categories
+  avgDaysOnMarket: number;
+  conversionRate: number;
 }
 
 interface Filters {
@@ -66,6 +66,8 @@ const ALLOWED_SUBURBS = [
   { name: 'Fig Tree Pocket', postcode: '4069' },
   { name: 'Pinjara Hills', postcode: '4069' },
 ];
+
+const ALLOWED_CATEGORIES = ['Listing', 'Sold'];
 
 export function AgentDashboard() {
   const { profile, user } = useAuthStore();
@@ -94,32 +96,18 @@ export function AgentDashboard() {
     categories: [],
   });
 
-  useEffect(() => {
-    if (profile?.role === 'agent') {
-      fetchPropertiesAndPredict();
-      fetchSuburbProgress();
-    } else if (profile) {
-      navigate('/agent-login');
-    }
-  }, [profile, navigate]);
-
-  useEffect(() => {
-    console.log('Filters changed:', { filters, searchQuery });
-    applyFiltersAndSearch();
-  }, [filters, searchQuery]);
-
-  const fetchPropertiesAndPredict = async () => {
+  const fetchPropertiesAndPredict = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      console.log('Fetching all properties...');
+      console.debug('Fetching properties...');
       const { data, error } = await supabase
         .from('properties')
         .select('*')
         .order('listed_date', { ascending: false });
       if (error) throw error;
 
-      console.log('Fetched properties:', data);
+      console.debug('Fetched properties:', data);
       const fetchedProperties = data || [];
       setProperties(fetchedProperties);
 
@@ -144,66 +132,183 @@ export function AgentDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchSuburbProgress = async () => {
+  const fetchSuburbProgress = useCallback(async () => {
     try {
+      console.debug('Fetching suburb progress...');
       const progressPromises = ALLOWED_SUBURBS.map(async (suburb) => {
-        const normalizedSuburbName = normalizeSuburb(suburb.name);
         const { data: properties, error } = await supabase
           .from('properties')
-          .select('id, category, suburb')
-          .ilike('suburb', normalizedSuburbName); // Case-insensitive suburb match
-
+          .select('id, category, listed_date, sold_date')
+          .ilike('suburb', suburb.name);
         if (error) throw error;
 
-        console.log(`Raw properties for ${normalizedSuburbName}:`, properties); // Debug log
-
         const totalProperties = properties?.length || 0;
-        let listedProperties = 0;
-        let soldProperties = 0;
-        let unknownCategoryCount = 0;
+        const listedProperties = properties?.filter(p => p.category?.toLowerCase() === 'listing').length || 0;
+        const soldProperties = properties?.filter(p => p.category?.toLowerCase() === 'sold').length || 0;
 
-        properties?.forEach((p) => {
-          const category = (p.category || '').toLowerCase();
-          if (category === 'listing') {
-            listedProperties += 1;
-          } else if (category === 'sold') {
-            soldProperties += 1;
-          } else {
-            unknownCategoryCount += 1;
-            console.warn(`Property ID ${p.id} in ${normalizedSuburbName} has invalid category: ${p.category}`);
-          }
-        });
+        const avgDaysOnMarket = properties
+          ?.filter(p => p.sold_date && p.listed_date)
+          .map(p => {
+            const listed = new Date(p.listed_date);
+            const sold = new Date(p.sold_date);
+            return (sold.getTime() - listed.getTime()) / (1000 * 60 * 60 * 24);
+          })
+          .reduce((sum, days) => sum + days, 0) / (soldProperties || 1) || 0;
 
-        const progress: SuburbProgress = {
-          suburb: normalizedSuburbName,
+        return {
+          suburb: suburb.name,
           totalProperties,
           listedProperties,
           soldProperties,
-          unknownCategoryCount,
+          avgDaysOnMarket: Math.round(avgDaysOnMarket),
+          conversionRate: totalProperties ? (soldProperties / totalProperties) * 100 : 0,
         };
-
-        console.log(`Progress for ${normalizedSuburbName}:`, progress); // Debug log
-
-        return progress;
       });
 
       const progressData = await Promise.all(progressPromises);
-      console.log('All suburb progress data:', progressData);
+      console.debug('Suburb progress data:', progressData);
       setSuburbProgress(progressData.filter(p => p.totalProperties > 0));
-
-      // Warn if there are properties with unknown categories
-      const totalUnknown = progressData.reduce((sum, p) => sum + (p.unknownCategoryCount || 0), 0);
-      if (totalUnknown > 0) {
-        toast.warn(`${totalUnknown} properties have invalid or missing categories. Check console for details.`);
-      }
     } catch (error) {
       console.error('Error fetching suburb progress:', error);
       toast.error('Failed to fetch suburb progress data');
       setSuburbProgress([]);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    console.debug('Checking auth state:', { user, profile });
+    if (!user || !profile) {
+      console.debug('No user or profile, redirecting to login');
+      navigate('/agent-login');
+      return;
+    }
+    if (profile?.role === 'agent') {
+      console.debug('Fetching properties and suburb progress for agent');
+      fetchPropertiesAndPredict();
+      fetchSuburbProgress();
+    } else {
+      console.debug('User is not an agent, redirecting to login');
+      navigate('/agent-login');
+    }
+  }, [profile, user, navigate, fetchPropertiesAndPredict, fetchSuburbProgress]);
+
+  const applyFiltersAndSearch = useCallback(async (query: string = '') => {
+    setLoading(true);
+    setError(null);
+    try {
+      console.debug('Applying filters:', { query, filters });
+      let queryBuilder = supabase.from('properties').select('*');
+
+      const sanitizedFilters = {
+        ...filters,
+        bedrooms: filters.bedrooms ? parseInt(filters.bedrooms, 10) : null,
+        bathrooms: filters.bathrooms ? parseInt(filters.bathrooms, 10) : null,
+        car_garage: filters.car_garage ? parseInt(filters.car_garage, 10) : null,
+        square_feet: filters.square_feet ? parseInt(filters.square_feet, 10) : null,
+        price: filters.price ? parseInt(filters.price, 10) : null,
+      };
+
+      // Log unique suburb and category values in database for debugging
+      const { data: debugData } = await supabase.from('properties').select('suburb, category');
+      console.debug('Database values:', {
+        suburbs: [...new Set(debugData?.map(d => d.suburb))],
+        categories: [...new Set(debugData?.map(d => d.category))],
+      });
+
+      if (filters.categories.length > 0) {
+        const normalizedCategories = filters.categories.map(c => c.toLowerCase());
+        console.debug('Applying category filter:', normalizedCategories);
+        queryBuilder = queryBuilder.in('category', normalizedCategories);
+      }
+      if (query.trim()) {
+        console.debug('Applying search query:', query.trim());
+        queryBuilder = queryBuilder.or(
+          `property_type.ilike.%${query.trim()}%,street_name.ilike.%${query.trim()}%,address.ilike.%${query.trim()}%,suburb.ilike.%${query.trim()}%`
+        );
+      }
+      if (sanitizedFilters.bedrooms && !isNaN(sanitizedFilters.bedrooms)) {
+        console.debug('Applying bedrooms filter:', sanitizedFilters.bedrooms);
+        queryBuilder = queryBuilder.eq('bedrooms', sanitizedFilters.bedrooms);
+      }
+      if (sanitizedFilters.bathrooms && !isNaN(sanitizedFilters.bathrooms)) {
+        console.debug('Applying bathrooms filter:', sanitizedFilters.bathrooms);
+        queryBuilder = queryBuilder.eq('bathrooms', sanitizedFilters.bathrooms);
+      }
+      if (sanitizedFilters.car_garage && !isNaN(sanitizedFilters.car_garage)) {
+        console.debug('Applying car_garage filter:', sanitizedFilters.car_garage);
+        queryBuilder = queryBuilder.eq('car_garage', sanitizedFilters.car_garage);
+      }
+      if (sanitizedFilters.square_feet && !isNaN(sanitizedFilters.square_feet)) {
+        console.debug('Applying square_feet filter:', sanitizedFilters.square_feet);
+        queryBuilder = queryBuilder.gte('square_feet', sanitizedFilters.square_feet);
+      }
+      if (sanitizedFilters.price && !isNaN(sanitizedFilters.price)) {
+        console.debug('Applying price filter:', sanitizedFilters.price);
+        queryBuilder = queryBuilder.lte('price', sanitizedFilters.price);
+      }
+      if (filters.suburbs.length > 0) {
+        console.debug('Applying suburbs filter:', filters.suburbs);
+        // Use ilike for each suburb to ensure case-insensitive matching
+        queryBuilder = queryBuilder.or(
+          filters.suburbs.map(s => `suburb.ilike.${s}`).join(',')
+        );
+      }
+      if (filters.propertyTypes.length > 0) {
+        console.debug('Applying propertyTypes filter:', filters.propertyTypes);
+        queryBuilder = queryBuilder.in('property_type', filters.propertyTypes.map(p => p.toLowerCase()));
+      }
+      if (filters.street_name.trim()) {
+        console.debug('Applying street_name filter:', filters.street_name.trim());
+        queryBuilder = queryBuilder.ilike('street_name', `%${filters.street_name.trim()}%`);
+      }
+
+      const { data, error } = await queryBuilder.order('listed_date', { ascending: false });
+      if (error) throw error;
+
+      console.debug('Query result:', { data });
+      setProperties(data || []);
+      if (data?.length === 0) {
+        const errorMessage = filters.suburbs.length > 0 || filters.categories.length > 0
+          ? `No properties found for ${filters.suburbs.length > 0 ? `suburb(s): ${filters.suburbs.join(', ')}` : ''}${
+              filters.suburbs.length > 0 && filters.categories.length > 0 ? ' and ' : ''
+            }${filters.categories.length > 0 ? `status: ${filters.categories.join(', ')}` : ''}. Try adjusting your filters or check if data exists.`
+          : 'No properties match the applied filters. Try adjusting your filters or check if data exists.';
+        setError(errorMessage);
+      } else {
+        setError(null);
+      }
+
+      const predictionPromises = (data || []).map(async (property) => {
+        const prediction = await analyzePriceTrend(
+          property.city || property.suburb || 'Unknown',
+          property.property_type || 'Unknown'
+        );
+        return { id: property.id, prediction };
+      });
+      const predictionResults = await Promise.all(predictionPromises);
+      const predictionMap = predictionResults.reduce((acc, { id, prediction }) => {
+        acc[id] = prediction;
+        return acc;
+      }, {} as Record<string, PredictionResult>);
+      setPredictions(predictionMap);
+    } catch (error: any) {
+      console.error('Error applying filters:', error);
+      setError('Failed to apply filters. Please try again or check your data.');
+      toast.error('Failed to apply filters');
+      setProperties([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, searchQuery]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      applyFiltersAndSearch();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filters, searchQuery, applyFiltersAndSearch]);
 
   const startVoiceCommand = () => {
     if (!('webkitSpeechRecognition' in window)) {
@@ -270,7 +375,7 @@ export function AgentDashboard() {
         marketCondition,
       };
     } catch (error) {
-      console.error('Price trend analysis failed:', error);
+      console.error('Error analyzing price trend:', error);
       return {
         recommendation: 'BUY',
         confidence: 50,
@@ -282,24 +387,17 @@ export function AgentDashboard() {
     }
   };
 
-  const debounce = (func: (...args: any[]) => void, delay: number) => {
-    let timeoutId: NodeJS.Timeout;
-    return (...args: any[]) => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => func(...args), delay);
-    };
-  };
-
   const fetchSuggestions = async (query: string) => {
-    if (!query) {
+    if (!query.trim()) {
       setSuggestions([]);
       return;
     }
     try {
+      console.debug('Fetching suggestions for query:', query);
       const { data, error } = await supabase
         .from('properties')
-        .select('property_type, street_name')
-        .or(`property_type.ilike.%${query}%,street_name.ilike.%${query}%`)
+        .select('property_type, street_name, suburb')
+        .or(`property_type.ilike.%${query.trim()}%,street_name.ilike.%${query.trim()}%,suburb.ilike.%${query.trim()}%`)
         .limit(10);
       if (error) throw error;
 
@@ -307,18 +405,21 @@ export function AgentDashboard() {
       (data || []).forEach((property: any) => {
         if (property.property_type?.toLowerCase().includes(query.toLowerCase())) suggestionSet.add(property.property_type);
         if (property.street_name?.toLowerCase().includes(query.toLowerCase())) suggestionSet.add(property.street_name);
+        if (property.suburb?.toLowerCase().includes(query.toLowerCase())) suggestionSet.add(property.suburb);
       });
-      setSuggestions(Array.from(suggestionSet).slice(0, 5));
+      const suggestionsList = Array.from(suggestionSet).slice(0, 5);
+      console.debug('Suggestions:', suggestionsList);
+      setSuggestions(suggestionsList);
     } catch (error) {
       console.error('Error fetching suggestions:', error);
       setSuggestions([]);
     }
   };
 
-  const handleSearchChange = debounce((value: string) => {
+  const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     fetchSuggestions(value);
-  }, 300);
+  }, []);
 
   const handleSuggestionClick = (suggestion: string) => {
     setSearchQuery(suggestion);
@@ -330,72 +431,9 @@ export function AgentDashboard() {
     applyFiltersAndSearch(searchQuery);
   };
 
-  const applyFiltersAndSearch = async (query: string = searchQuery) => {
-    setLoading(true);
-    setError(null);
-    try {
-      console.log('Applying filters:', { filters, query });
-      let queryBuilder = supabase.from('properties').select('*');
-
-      // Apply category filter only if explicitly set
-      if (filters.categories.length > 0) {
-        console.log('Filtering by categories (in):', filters.categories);
-        queryBuilder = queryBuilder.in('category', filters.categories.map(c => c.toLowerCase()));
-      } else {
-        console.log('No category filter applied, fetching all properties');
-      }
-
-      // Apply search query if present
-      if (query) {
-        queryBuilder = queryBuilder.or(
-          `property_type.ilike.%${query}%,street_name.ilike.%${query}%,address.ilike.%${query}%`
-        );
-      }
-
-      // Apply other filters
-      if (filters.bedrooms) queryBuilder = queryBuilder.gte('bedrooms', parseInt(filters.bedrooms) || 0);
-      if (filters.bathrooms) queryBuilder = queryBuilder.gte('bathrooms', parseInt(filters.bathrooms) || 0);
-      if (filters.car_garage) queryBuilder = queryBuilder.gte('car_garage', parseInt(filters.car_garage) || 0);
-      if (filters.square_feet) queryBuilder = queryBuilder.gte('square_feet', parseInt(filters.square_feet) || 0);
-      if (filters.price) queryBuilder = queryBuilder.lte('price', parseInt(filters.price) || 0);
-      if (filters.suburbs.length > 0) queryBuilder = queryBuilder.in('suburb', filters.suburbs.map(normalizeSuburb));
-      if (filters.propertyTypes.length > 0) queryBuilder = queryBuilder.in('property_type', filters.propertyTypes);
-      if (filters.street_name) queryBuilder = queryBuilder.ilike('street_name', `%${filters.street_name}%`);
-
-      const { data, error } = await queryBuilder.order('listed_date', { ascending: false });
-      if (error) throw error;
-
-      console.log('Filtered properties:', data);
-      setProperties(data || []);
-      setError(data?.length === 0 ? 'No properties match the applied filters.' : null);
-
-      // Fetch predictions for filtered properties
-      const predictionPromises = (data || []).map(async (property) => {
-        const prediction = await analyzePriceTrend(
-          property.city || property.suburb || 'Unknown',
-          property.property_type || 'Unknown'
-        );
-        return { id: property.id, prediction };
-      });
-      const predictionResults = await Promise.all(predictionPromises);
-      const predictionMap = predictionResults.reduce((acc, { id, prediction }) => {
-        acc[id] = prediction;
-        return acc;
-      }, {} as Record<string, PredictionResult>);
-      setPredictions(predictionMap);
-    } catch (error: any) {
-      console.error('Error applying filters and search:', error);
-      setError('Failed to apply filters. Please try again.');
-      toast.error('Failed to apply filters');
-      setProperties([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const countActiveFilters = () => {
+  const countActiveFilters = useCallback(() => {
     let count = 0;
-    if (searchQuery) count++;
+    if (searchQuery.trim()) count++;
     if (filters.bedrooms) count++;
     if (filters.bathrooms) count++;
     if (filters.car_garage) count++;
@@ -403,12 +441,13 @@ export function AgentDashboard() {
     if (filters.price) count++;
     if (filters.suburbs.length > 0) count++;
     if (filters.propertyTypes.length > 0) count++;
-    if (filters.street_name) count++;
+    if (filters.street_name.trim()) count++;
     if (filters.categories.length > 0) count++;
     return count;
-  };
+  }, [filters, searchQuery]);
 
   const clearAllFilters = () => {
+    console.debug('Clearing all filters');
     setSearchQuery('');
     setSuggestions([]);
     setFilters({
@@ -426,7 +465,6 @@ export function AgentDashboard() {
   };
 
   const handleCategoryClick = (category: string) => {
-    console.log('Category clicked:', category);
     setFilters((prev) => {
       const newCategories = prev.categories.includes(category)
         ? prev.categories.filter((c) => c !== category)
@@ -436,113 +474,128 @@ export function AgentDashboard() {
   };
 
   const generateReport = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text('Agent Property Report', 20, 20);
-    doc.setFontSize(10);
-    doc.text(`Generated on: ${new Date().toLocaleDateString('en-AU')}`, 20, 30);
+    try {
+      const doc = new jsPDF();
+      doc.setFontSize(18);
+      doc.text('Agent Property Report', 20, 20);
+      doc.setFontSize(10);
+      doc.text(`Generated on: ${new Date().toLocaleDateString('en-AU')}`, 20, 30);
 
-    doc.setFontSize(14);
-    doc.text('Applied Filters', 20, 40);
-    doc.setFontSize(10);
-    let yPos = 50;
-    const activeFilters = Object.entries(filters).filter(([_, value]) =>
-      (typeof value === 'string' && value && value !== '') || (Array.isArray(value) && value.length > 0)
-    );
-    if (searchQuery) activeFilters.unshift(['Search', searchQuery]);
-    if (activeFilters.length === 0) {
-      doc.text('No filters applied', 20, yPos);
-    } else {
-      activeFilters.forEach(([key, value]) => {
-        doc.text(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`, 20, yPos);
-        yPos += 10;
-      });
-    }
-
-    doc.setFontSize(14);
-    doc.text('Suburb Progress Summary', 20, yPos + 10);
-    doc.setFontSize(10);
-    yPos += 20;
-    suburbProgress.forEach((progress) => {
-      doc.text(`${progress.suburb}:`, 20, yPos);
-      doc.text(`Listed Properties: ${progress.listedProperties}`, 40, yPos + 5);
-      doc.text(`Sold Properties: ${progress.soldProperties}`, 40, yPos + 10);
-      if (progress.unknownCategoryCount && progress.unknownCategoryCount > 0) {
-        doc.text(`Unknown Category: ${progress.unknownCategoryCount}`, 40, yPos + 15);
-        yPos += 5;
+      doc.setFontSize(14);
+      doc.text('Applied Filters', 20, 40);
+      doc.setFontSize(10);
+      let yPos = 50;
+      const activeFilters = Object.entries(filters).filter(
+        ([_, value]) => (typeof value === 'string' && value.trim()) || (Array.isArray(value) && value.length > 0)
+      );
+      if (searchQuery.trim()) activeFilters.unshift(['Search', searchQuery]);
+      if (activeFilters.length === 0) {
+        doc.text('No filters applied', 20, yPos);
+      } else {
+        activeFilters.forEach(([key, value]) => {
+          doc.text(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`, 20, yPos);
+          yPos += 10;
+        });
       }
+
+      doc.setFontSize(14);
+      doc.text('Suburb Progress Summary', 20, yPos + 10);
+      doc.setFontSize(10);
       yPos += 20;
-    });
+      suburbProgress.forEach((progress) => {
+        doc.text(`${progress.suburb}:`, 20, yPos);
+        doc.text(`Listed: ${progress.listedProperties}/${progress.totalProperties} (${(progress.listedProperties / (progress.totalProperties || 1) * 100).toFixed(1)}%)`, 40, yPos + 5);
+        doc.text(`Sold: ${progress.soldProperties}/${progress.totalProperties} (${(progress.soldProperties / (progress.totalProperties || 1) * 100).toFixed(1)}%)`, 40, yPos + 10);
+        doc.text(`Conversion Rate: ${progress.conversionRate.toFixed(1)}%`, 40, yPos + 15);
+        doc.text(`Avg Days on Market: ${progress.avgDaysOnMarket}`, 40, yPos + 20);
+        yPos += 30;
+      });
 
-    doc.setFontSize(14);
-    doc.text('Summary Statistics', 20, yPos + 10);
-    doc.setFontSize(10);
-    yPos += 20;
-    const avgPrice = properties.reduce((sum, p) => sum + (p.price || 0), 0) / properties.length || 0;
-    doc.text(`Total Properties: ${properties.length}`, 20, yPos);
-    doc.text(`Sold Properties: ${properties.filter(p => p.category?.toLowerCase() === 'sold').length}`, 20, yPos + 10);
-    doc.text(`Average Price: ${formatCurrency(avgPrice)}`, 20, yPos + 20);
+      doc.setFontSize(14);
+      doc.text('Summary Statistics', 20, yPos + 10);
+      doc.setFontSize(10);
+      yPos += 20;
+      const avgPrice = properties.reduce((sum, p) => sum + (p.price || 0), 0) / (properties.length || 1);
+      doc.text(`Total Properties: ${properties.length}`, 20, yPos);
+      doc.text(`Sold Properties: ${properties.filter(p => p.category?.toLowerCase() === 'sold').length}`, 20, yPos + 10);
+      doc.text(`Average Price: ${formatCurrency(avgPrice)}`, 20, yPos + 20);
 
-    yPos += 30;
-    const tableData = properties.map((p) => [
-      p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A',
-      normalizeSuburb(p.suburb || 'N/A'),
-      p.street_name || 'N/A',
-      p.bedrooms ?? 'N/A',
-      p.bathrooms ?? 'N/A',
-      p.car_garage ?? 'N/A',
-      p.price ? formatCurrency(p.price) : 'N/A',
-      p.agent_name || 'N/A',
-      p.category || 'N/A',
-    ]);
-    (doc as any).autoTable({
-      head: [['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status']],
-      body: tableData,
-      startY: yPos,
-      styles: { fontSize: 8 },
-    });
+      yPos += 30;
+      const tableData = properties.map((p) => [
+        p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A',
+        p.suburb || 'N/A',
+        p.street_name || 'N/A',
+        p.bedrooms?.toString() || 'N/A',
+        p.bathrooms?.toString() || 'N/A',
+        p.car_garage?.toString() || 'N/A',
+        p.price ? formatCurrency(p.price) : 'N/A',
+        p.agent_name || 'N/A',
+        p.category || 'N/A',
+      ]);
+      (doc as any).autoTable({
+        head: [['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status']],
+        body: tableData,
+        startY: yPos,
+        styles: { fontSize: 8 },
+      });
 
-    doc.save(`agent_dashboard_report_${new Date().toISOString().split('T')[0]}.pdf`);
+      doc.save(`agent_dashboard_report_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF report:', error);
+      toast.error('Failed to generate PDF report');
+    }
   };
 
   const exportToCSV = () => {
-    const headers = ['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status'];
-    const rows = properties.map((p) => [
-      `"${p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A'}"`,
-      `"${normalizeSuburb(p.suburb || 'N/A')}"`,
-      `"${p.street_name || 'N/A'}"`,
-      p.bedrooms ?? 'N/A',
-      p.bathrooms ?? 'N/A',
-      p.car_garage ?? 'N/A',
-      p.price ? formatCurrency(p.price) : 'N/A',
-      `"${p.agent_name || 'N/A'}"`,
-      `"${p.category || 'N/A'}"`,
-    ]);
-    const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `agent_properties_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const headers = ['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status'];
+      const rows = properties.map((p) => [
+        `"${p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A'}"`,
+        `"${p.suburb || 'N/A'}"`,
+        `"${p.street_name || 'N/A'}"`,
+        p.bedrooms?.toString() || 'N/A',
+        p.bathrooms?.toString() || 'N/A',
+        p.car_garage?.toString() || 'N/A',
+        p.price ? formatCurrency(p.price) : 'N/A',
+        `"${p.agent_name || 'N/A'}"`,
+        `"${p.category || 'N/A'}"`,
+      ]);
+      const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute('download', `agent_properties_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      toast.error('Failed to export CSV');
+    }
   };
 
   const chartData = suburbProgress.length ? {
     labels: suburbProgress.map(p => p.suburb),
     datasets: [
       {
-        label: 'Listed Properties',
-        data: suburbProgress.map(p => p.listedProperties),
+        label: 'Listing Progress (%)',
+        data: suburbProgress.map(p => Number(((p.listedProperties / (p.totalProperties || 1)) * 100).toFixed(1))),
         backgroundColor: 'rgba(59, 130, 246, 0.6)',
         borderColor: 'rgb(59, 130, 246)',
         borderWidth: 1,
       },
       {
-        label: 'Sold Properties',
-        data: suburbProgress.map(p => p.soldProperties),
+        label: 'Sold Properties (%)',
+        data: suburbProgress.map(p => Number(((p.soldProperties / (p.totalProperties || 1)) * 100).toFixed(1))),
         backgroundColor: 'rgba(239, 68, 68, 0.6)',
         borderColor: 'rgb(239, 68, 68)',
+        borderWidth: 1,
+      },
+      {
+        label: 'Conversion Rate (%)',
+        data: suburbProgress.map(p => Number(p.conversionRate.toFixed(1))),
+        backgroundColor: 'rgba(16, 185, 129, 0.6)',
+        borderColor: 'rgb(16, 185, 129)',
         borderWidth: 1,
       },
     ],
@@ -550,17 +603,24 @@ export function AgentDashboard() {
     labels: ['No Data'],
     datasets: [
       {
-        label: 'Listed Properties',
+        label: 'Listing Progress (%)',
         data: [0],
         backgroundColor: 'rgba(59, 130, 246, 0.6)',
         borderColor: 'rgb(59, 130, 246)',
         borderWidth: 1,
       },
       {
-        label: 'Sold Properties',
+        label: 'Sold Properties (%)',
         data: [0],
         backgroundColor: 'rgba(239, 68, 68, 0.6)',
         borderColor: 'rgb(239, 68, 68)',
+        borderWidth: 1,
+      },
+      {
+        label: 'Conversion Rate (%)',
+        data: [0],
+        backgroundColor: 'rgba(16, 185, 129, 0.6)',
+        borderColor: 'rgb(16, 185, 129)',
         borderWidth: 1,
       },
     ],
@@ -580,7 +640,7 @@ export function AgentDashboard() {
       },
       title: {
         display: true,
-        text: 'Suburb Property Status',
+        text: 'Suburb Progress Overview',
         font: { size: 16 },
         color: '#1F2937',
         padding: { top: 10, bottom: 10 },
@@ -591,7 +651,7 @@ export function AgentDashboard() {
         titleFont: { size: 12 },
         bodyFont: { size: 12 },
         callbacks: {
-          label: (context: any) => `${context.dataset.label}: ${context.parsed.y}`,
+          label: (context: any) => `${context.dataset.label}: ${context.parsed.y}%`,
         },
       },
     },
@@ -608,12 +668,13 @@ export function AgentDashboard() {
       },
       y: {
         beginAtZero: true,
+        max: 100,
         ticks: {
           color: '#1F2937',
-          stepSize: 1,
+          stepSize: 20,
           callback: (tickValue: string | number) => {
             const value = typeof tickValue === 'string' ? parseFloat(tickValue) : tickValue;
-            return Number.isFinite(value) ? `${value}` : '';
+            return Number.isFinite(value) ? `${value}%` : '';
           },
         },
         grid: {
@@ -623,34 +684,18 @@ export function AgentDashboard() {
     },
   };
 
-  if (!user || profile?.role !== 'agent') {
-    return <Navigate to="/agent-login" />;
-  }
-
   if (loading) {
     return <LoadingOverlay message="Loading dashboard..." />;
   }
 
-  if (error) {
-    return (
-      <div className="max-w-7xl mx-auto p-6">
-        <h1 className="text-3xl font-bold text-gray-800 mb-8">Agent Dashboard</h1>
-        <div className="bg-red-50 p-4 rounded-lg shadow-md">
-          <p className="text-red-600">{error}</p>
-          <button
-            onClick={fetchPropertiesAndPredict}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
+  if (!user || !profile || profile?.role !== 'agent') {
+    console.debug('Rendering redirect to /agent-login');
+    return <Navigate to="/agent-login" />;
   }
 
   const marketInsights = {
     totalProperties: properties.length,
-    avgPrice: properties.reduce((sum, p) => sum + (p.price || 0), 0) / properties.length || 0,
+    avgPrice: properties.reduce((sum, p) => sum + (p.price || 0), 0) / (properties.length || 1),
     soldCount: properties.filter((p) => p.category?.toLowerCase() === 'sold').length,
   };
 
@@ -668,6 +713,26 @@ export function AgentDashboard() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-50 p-4 rounded-lg shadow-md mb-8">
+          <p className="text-red-600">{error}</p>
+          <div className="flex gap-4 mt-4">
+            <button
+              onClick={clearAllFilters}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Reset Filters
+            </button>
+            <button
+              onClick={fetchPropertiesAndPredict}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
         <Link to="/property-form" className="bg-blue-600 text-white p-6 rounded-lg hover:bg-blue-700 transition flex flex-col items-center justify-center">
@@ -714,45 +779,35 @@ export function AgentDashboard() {
             >
               <option value="">Select a suburb</option>
               {ALLOWED_SUBURBS.map(suburb => (
-                <option key={suburb.name} value={suburb.name}>{normalizeSuburb(suburb.name)}</option>
+                <option key={suburb.name} value={suburb.name}>{suburb.name}</option>
               ))}
             </select>
           </div>
 
           {suburbProgress.length === 0 ? (
             <div className="text-center py-4 text-gray-600">
-              No suburb progress data available. Please check your data source or refresh.
+              No suburb progress data available. Please try refreshing or check your data source.
             </div>
           ) : (
-            <>
-              <div className="mb-6" style={{ height: '300px', position: 'relative' }}>
-                <Bar data={chartData} options={chartOptions} />
-              </div>
-              {suburbProgress.some(p => p.unknownCategoryCount && p.unknownCategoryCount > 0) && (
-                <div className="bg-yellow-50 p-4 rounded-lg mb-4">
-                  <p className="text-yellow-700 text-sm">
-                    Warning: Some properties have invalid or missing categories, which may affect counts. Check console logs for details.
-                  </p>
-                </div>
-              )}
-            </>
+            <div className="mb-6" style={{ height: '300px', position: 'relative' }}>
+              <Bar data={chartData} options={chartOptions} />
+            </div>
           )}
 
-          {selectedSuburb && suburbProgress.find(p => p.suburb === normalizeSuburb(selectedSuburb)) && (
+          {selectedSuburb && suburbProgress.find(p => p.suburb === selectedSuburb) && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              className="grid grid-cols-1 md:grid-cols-4 gap-4"
             >
               {(() => {
-                const progress = suburbProgress.find(p => p.suburb === normalizeSuburb(selectedSuburb));
+                const progress = suburbProgress.find(p => p.suburb === selectedSuburb);
                 if (!progress) return null;
                 return (
                   <>
                     <div className="bg-gray-50 p-4 rounded-lg">
-                      <h3 className="text-lg font-semibold text-gray-800">Listed Properties</h3>
-                      <p className="text-2xl font-bold text-blue-600">{progress.listedProperties}</p>
+                      <h3 className="text-lg font-semibold">Listing Progress</h3>
                       <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
                         <div
                           className="bg-blue-600 h-2.5 rounded-full"
@@ -760,12 +815,11 @@ export function AgentDashboard() {
                         ></div>
                       </div>
                       <p className="text-sm text-gray-600 mt-2">
-                        {progress.listedProperties} of {progress.totalProperties} ({((progress.listedProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
+                        {progress.listedProperties}/{progress.totalProperties} ({((progress.listedProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
                       </p>
                     </div>
                     <div className="bg-gray-50 p-4 rounded-lg">
-                      <h3 className="text-lg font-semibold text-gray-800">Sold Properties</h3>
-                      <p className="text-2xl font-bold text-red-600">{progress.soldProperties}</p>
+                      <h3 className="text-lg font-semibold">Sold Properties</h3>
                       <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
                         <div
                           className="bg-red-600 h-2.5 rounded-full"
@@ -773,17 +827,24 @@ export function AgentDashboard() {
                         ></div>
                       </div>
                       <p className="text-sm text-gray-600 mt-2">
-                        {progress.soldProperties} of {progress.totalProperties} ({((progress.soldProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
+                        {progress.soldProperties}/{progress.totalProperties} ({((progress.soldProperties / (progress.totalProperties || 1)) * 100).toFixed(1)}%)
                       </p>
                     </div>
-                    {progress.unknownCategoryCount && progress.unknownCategoryCount > 0 && (
-                      <div className="bg-yellow-50 p-4 rounded-lg col-span-2">
-                        <h3 className="text-lg font-semibold text-gray-800">Data Issue</h3>
-                        <p className="text-sm text-yellow-700">
-                          {progress.unknownCategoryCount} properties in {progress.suburb} have invalid or missing categories. Please update the database.
-                        </p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h3 className="text-lg font-semibold">Conversion Rate</h3>
+                      <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                        <div
+                          className="bg-green-600 h-2.5 rounded-full"
+                          style={{ width: `${progress.conversionRate}%` }}
+                        ></div>
                       </div>
-                    )}
+                      <p className="text-sm text-gray-600 mt-2">{progress.conversionRate.toFixed(1)}%</p>
+                    </div>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <h3 className="text-lg font-semibold">Avg Days on Market</h3>
+                      <p className="text-2xl font-bold text-blue-600">{progress.avgDaysOnMarket}</p>
+                      <p className="text-sm text-gray-600">days</p>
+                    </div>
                   </>
                 );
               })()}
@@ -801,7 +862,7 @@ export function AgentDashboard() {
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
-              placeholder="Search properties (e.g., house, street)..."
+              placeholder="Search properties (e.g., house, street, suburb)..."
               className="block w-full pl-10 pr-12 py-2 border border-gray-300 rounded-lg bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <button
@@ -840,7 +901,7 @@ export function AgentDashboard() {
 
         {countActiveFilters() > 0 && (
           <div className="flex flex-wrap gap-2 mb-4">
-            {searchQuery && (
+            {searchQuery.trim() && (
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                 Search: "{searchQuery}"
                 <button
@@ -855,7 +916,7 @@ export function AgentDashboard() {
               </span>
             )}
             {Object.entries(filters).map(([key, value]) => {
-              if ((typeof value === 'string' && value && value !== '') || (Array.isArray(value) && value.length > 0)) {
+              if ((typeof value === 'string' && value.trim()) || (Array.isArray(value) && value.length > 0)) {
                 return (
                   <span key={key} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                     {key}: {Array.isArray(value) ? value.join(', ') : value}
@@ -889,7 +950,7 @@ export function AgentDashboard() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => {
-                      setFilters((prev) => ({ ...prev, bedrooms: '3', bathrooms: '2' }));
+                      setFilters((prev) => ({ ...prev, bedrooms: '3', bathrooms: '2', propertyTypes: ['House'] }));
                     }}
                     className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full"
                   >
@@ -897,7 +958,7 @@ export function AgentDashboard() {
                   </button>
                   <button
                     onClick={() => {
-                      setFilters((prev) => ({ ...prev, propertyTypes: ['Apartment'] }));
+                      setFilters((prev) => ({ ...prev, propertyTypes: ['Apartment'], bedrooms: '1', bathrooms: '1' }));
                     }}
                     className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full"
                   >
@@ -915,24 +976,24 @@ export function AgentDashboard() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Min Bedrooms</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bedrooms</label>
                 <input
                   type="number"
                   value={filters.bedrooms}
                   onChange={(e) => setFilters((prev) => ({ ...prev, bedrooms: e.target.value }))}
-                  placeholder="Enter min bedrooms"
+                  placeholder="Enter number of bedrooms"
                   className="w-full p-2 border rounded"
                   min="0"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Min Bathrooms</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bathrooms</label>
                 <input
                   type="number"
                   value={filters.bathrooms}
                   onChange={(e) => setFilters((prev) => ({ ...prev, bathrooms: e.target.value }))}
-                  placeholder="Enter min bathrooms"
+                  placeholder="Enter number of bathrooms"
                   className="w-full p-2 border rounded"
                   min="0"
                 />
@@ -940,21 +1001,21 @@ export function AgentDashboard() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Property Type</label>
-                <input
-                  type="text"
-                  value={filters.propertyTypes.join(', ')}
+                <select
+                  multiple
+                  value={filters.propertyTypes}
                   onChange={(e) =>
                     setFilters((prev) => ({
                       ...prev,
-                      propertyTypes: e.target.value
-                        .split(',')
-                        .map((t) => t.trim())
-                        .filter(Boolean),
+                      propertyTypes: Array.from(e.target.selectedOptions).map((option) => option.value),
                     }))
                   }
-                  placeholder="e.g., House, Apartment"
-                  className="w-full p-2 border rounded"
-                />
+                  className="w-full p-2 border rounded h-24"
+                >
+                  {['House', 'Apartment', 'Townhouse', 'Unit'].map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -972,7 +1033,7 @@ export function AgentDashboard() {
                 >
                   {ALLOWED_SUBURBS.map((suburb) => (
                     <option key={`${suburb.name}-${suburb.postcode}`} value={suburb.name}>
-                      {`${normalizeSuburb(suburb.name)} ${suburb.postcode}`}
+                      {`${suburb.name} ${suburb.postcode}`}
                     </option>
                   ))}
                 </select>
@@ -987,6 +1048,7 @@ export function AgentDashboard() {
                   placeholder="Enter max price"
                   className="w-full p-2 border rounded"
                   min="0"
+                  step="1000"
                 />
               </div>
 
@@ -1038,7 +1100,7 @@ export function AgentDashboard() {
                   }
                   className="w-full p-2 border rounded h-24"
                 >
-                  {['Listing', 'Sold'].map((category) => (
+                  {ALLOWED_CATEGORIES.map((category) => (
                     <option key={category} value={category}>
                       {category}
                     </option>
@@ -1059,7 +1121,7 @@ export function AgentDashboard() {
         )}
 
         <div className="flex gap-4 mb-4">
-          {['Listing', 'Sold'].map((category) => (
+          {ALLOWED_CATEGORIES.map((category) => (
             <button
               key={category}
               onClick={() => handleCategoryClick(category)}
@@ -1106,12 +1168,12 @@ export function AgentDashboard() {
 
         {properties.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-600 text-lg mb-4">No properties match your criteria.</p>
+            <p className="text-gray-600 text-lg mb-4">{error || 'No properties match your criteria.'}</p>
             <button
               onClick={clearAllFilters}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
-              Clear all filters
+              Reset all filters
             </button>
           </div>
         ) : (
@@ -1143,21 +1205,21 @@ export function AgentDashboard() {
                   </span>
                 </div>
                 <p className="text-gray-600 font-medium">
-                  {normalizeSuburb(property.suburb || 'Unknown Suburb')}
+                  {property.suburb || 'Unknown Suburb'}
                 </p>
                 <p className="text-gray-600">Type: {property.property_type || 'Unknown'}</p>
                 <div className="flex items-center text-gray-600 space-x-4 mt-2">
                   <div className="flex items-center">
                     <Home className="w-4 h-4 mr-1" />
-                    <span>{property.bedrooms ?? 'N/A'}</span>
+                    <span>{property.bedrooms?.toString() || 'N/A'}</span>
                   </div>
                   <div className="flex items-center">
                     <Bath className="w-4 h-4 mr-1" />
-                    <span>{property.bathrooms ?? 'N/A'}</span>
+                    <span>{property.bathrooms?.toString() || 'N/A'}</span>
                   </div>
                   <div className="flex items-center">
                     <Car className="w-4 h-4 mr-1" />
-                    <span>{property.car_garage ?? 'N/A'}</span>
+                    <span>{property.car_garage?.toString() || 'N/A'}</span>
                   </div>
                 </div>
                 <p className="text-green-600 font-bold mt-2">

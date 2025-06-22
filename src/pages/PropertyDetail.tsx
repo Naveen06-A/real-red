@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, Download, ArrowLeft, MapPin, DollarSign, Home, Calendar, Heart, ArrowRight, ShieldCheck, Zap, Building, Bed, Bath, Car, Maximize, LandPlot, User, Building2, AlertTriangle, Shield, CheckSquare, FileText } from 'lucide-react';
-import { generatePdf } from '../utils/pdfUtils';
 import { formatCurrency } from '../utils/formatters';
 import { Property } from '../types/Property';
 import jsPDF from 'jspdf';
@@ -14,7 +13,10 @@ import L, { LatLngTuple } from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Extend Property interface to include latitude, longitude, same_street_sales, and past_records
+// Logo URL from Logo.tsx
+const LOGO_URL = 'https://raw.githubusercontent.com/Naveen06-A/image-/451d7ca2516e5ab3862be90d6f5b448d48ade876/red-tulip-logo.jpg';
+
+// Extend Property interface
 interface ExtendedProperty extends Property {
   latitude?: number;
   longitude?: number;
@@ -45,7 +47,7 @@ interface ExtendedProperty extends Property {
   }>;
 }
 
-// Helper function to calculate commission
+// Helper functions
 const calculateCommission = (property: ExtendedProperty): { commissionRate: number; commissionEarned: number } => {
   const commissionRate = property.commission || 0;
   const basePrice = property.sold_price || property.price || 0;
@@ -53,7 +55,6 @@ const calculateCommission = (property: ExtendedProperty): { commissionRate: numb
   return { commissionRate, commissionEarned };
 };
 
-// Helper function to generate mock coordinates
 const generateMockCoordinates = (suburb: string = 'Brisbane', index: number = 0): { latitude: number; longitude: number } => {
   const baseCoords: Record<string, { lat: number; lng: number }> = {
     'Pullenvale 4069': { lat: -27.522, lng: 152.885 },
@@ -68,7 +69,7 @@ const generateMockCoordinates = (suburb: string = 'Brisbane', index: number = 0)
     'Bellbowrie 4070': { lat: -27.559, lng: 152.886 },
   };
   const normalizedSuburb = normalizeSuburb(suburb);
-  const base = baseCoords[normalizedSuburb] || { lat: -27.467, lng: 153.028 }; // Default to Brisbane CBD
+  const base = baseCoords[normalizedSuburb] || { lat: -27.467, lng: 153.028 };
   const offset = index * 0.0005;
   return {
     latitude: base.lat + offset,
@@ -76,7 +77,6 @@ const generateMockCoordinates = (suburb: string = 'Brisbane', index: number = 0)
   };
 };
 
-// Helper function to generate PDF report
 const generatePDFReport = async (
   property: ExtendedProperty,
   options: {
@@ -85,62 +85,168 @@ const generatePDFReport = async (
     includePrediction: boolean;
   }
 ) => {
-  const head = [['Field', 'Value']];
-  const { commissionRate, commissionEarned } = calculateCommission(property);
-  const body = [
-    ['Address', `${property.street_number || 'N/A'} ${property.street_name || 'N/A'}, ${normalizeSuburb(property.suburb)}`],
-    ['Price', property.price ? formatCurrency(property.price) : 'N/A'],
-    ['Sold Price', property.sold_price ? formatCurrency(property.sold_price) : 'N/A'],
-    ['Expected Price', property.expected_price ? formatCurrency(property.expected_price) : 'N/A'],
-    ['Commission', commissionRate ? `${commissionRate}%` : 'N/A'],
-    ['Commission Earned', commissionEarned ? formatCurrency(commissionEarned) : 'N/A'],
-    ['Property Type', property.property_type || 'N/A'],
-    ['Category', property.category || 'N/A'],
-    ['Sale Type', property.sale_type || 'N/A'],
-    ['Bedrooms', property.bedrooms ?? 'N/A'],
-    ['Bathrooms', property.bathrooms ?? 'N/A'],
-    ['Garage', property.car_garage ?? 'N/A'],
-    ['Floor Area', property.sqm ? `${property.sqm} sqm` : 'N/A'],
-    ['Land Size', property.landsize ? `${property.landsize} sqm` : 'N/A'],
-    ['Listed Date', property.listed_date ? moment(property.listed_date).format('DD/MM/YYYY') : 'N/A'],
-    ['Sold Date', property.sold_date ? moment(property.sold_date).format('DD/MM/YYYY') : 'N/A'],
-    ['Agent', property.agent_name || 'N/A'],
-    ['Agency', property.agency_name || 'N/A'],
-    ['Flood Risk', property.flood_risk || 'N/A'],
-    ['Bushfire Risk', property.bushfire_risk || 'N/A'],
-    ['Contract Status', property.contract_status || 'N/A'],
-    ['Features', property.features?.length ? property.features.join(', ') : 'N/A'],
-    ['Latitude', property.latitude ? property.latitude.toFixed(6) : 'N/A'],
-    ['Longitude', property.longitude ? property.longitude.toFixed(6) : 'N/A'],
-  ];
+  try {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const companyName = 'Red Tulip Realty';
+    const reportDate = moment().format('DD/MM/YYYY');
 
-  if (options.includeSameStreetSales && property.same_street_sales.length > 0) {
-    body.push(['\nComparable Sales (Same Street)']);
-    property.same_street_sales.forEach((sale) => {
-      body.push(
-        ['Address', sale.address || 'N/A'],
-        ['Sale Price', sale.sale_price ? formatCurrency(sale.sale_price) : 'N/A'],
-        ['Property Type', sale.property_type || 'N/A'],
-        ['Sale Date', sale.sale_date ? moment(sale.sale_date).format('DD/MM/YYYY') : 'N/A']
-      );
+    // Add watermark function
+    const addWatermark = async () => {
+      return new Promise<void>((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.src = LOGO_URL;
+
+        img.onload = () => {
+          doc.saveGraphicsState();
+          doc.setGState(new doc.GState({ opacity: 0.05 }));
+          doc.addImage(img, 'JPEG', pageWidth / 4, pageHeight / 4, pageWidth / 2, pageHeight / 2);
+          doc.restoreGraphicsState();
+          resolve();
+        };
+
+        img.onerror = () => {
+          console.warn('Failed to load logo image, skipping watermark');
+          resolve(); // Resolve even on error to continue PDF generation
+        };
+      });
+    };
+
+    // Apply watermark to current page
+    await addWatermark();
+
+    // Header function
+    const addHeader = () => {
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text(companyName, margin, 10);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`Report Date: ${reportDate}`, pageWidth - margin - 50, 10);
+      doc.setLineWidth(0.5);
+      doc.line(margin, 15, pageWidth - margin, 15);
+    };
+
+    // Footer function
+    const addFooter = () => {
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+      doc.text('© 2025 Red Tulip Realty', margin, pageHeight - 10);
+    };
+
+    // Cover page
+    addHeader();
+    addFooter();
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Property Report', pageWidth / 2, 50, { align: 'center' });
+    doc.setFontSize(16);
+    doc.text(
+      `${property.street_number || 'N/A'} ${property.street_name || 'N/A'}, ${normalizeSuburb(property.suburb)}`,
+      pageWidth / 2,
+      70,
+      { align: 'center', maxWidth: pageWidth - margin * 2 }
+    );
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Prepared by: ${companyName}`, pageWidth / 2, 100, { align: 'center' });
+    doc.text(`Date: ${reportDate}`, pageWidth / 2, 110, { align: 'center' });
+    doc.addPage();
+
+    // Property Details Section
+    addHeader();
+    addFooter();
+    await addWatermark();
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Property Details', margin, 25);
+    const { commissionRate, commissionEarned } = calculateCommission(property);
+    const propertyTable = [
+      ['Address', `${property.street_number || 'N/A'} ${property.street_name || 'N/A'}, ${normalizeSuburb(property.suburb)}`],
+      ['Price', property.price ? formatCurrency(property.price) : 'N/A'],
+      ['Sold Price', property.sold_price ? formatCurrency(property.sold_price) : 'N/A'],
+      ['Expected Price', property.expected_price ? formatCurrency(property.expected_price) : 'N/A'],
+      ['Commission', commissionRate ? `${commissionRate}%` : 'N/A'],
+      ['Commission Earned', commissionEarned ? formatCurrency(commissionEarned) : 'N/A'],
+      ['Property Type', property.property_type || 'N/A'],
+      ['Category', property.category || 'N/A'],
+      ['Sale Type', property.sale_type || 'N/A'],
+      ['Bedrooms', property.bedrooms ?? 'N/A'],
+      ['Bathrooms', property.bathrooms ?? 'N/A'],
+      ['Garage', property.car_garage ?? 'N/A'],
+      ['Floor Area', property.sqm ? `${property.sqm} sqm` : 'N/A'],
+      ['Land Size', property.landsize ? `${property.landsize} sqm` : 'N/A'],
+      ['Listed Date', property.listed_date ? moment(property.listed_date).format('DD/MM/YYYY') : 'N/A'],
+      ['Sold Date', property.sold_date ? moment(property.sold_date).format('DD/MM/YYYY') : 'N/A'],
+      ['Agent', property.agent_name || 'N/A'],
+      ['Agency', property.agency_name || 'N/A'],
+      ['Flood Risk', property.flood_risk || 'N/A'],
+      ['Bushfire Risk', property.bushfire_risk || 'N/A'],
+      ['Contract Status', property.contract_status || 'N/A'],
+      ['Features', property.features?.length ? property.features.join(', ') : 'N/A'],
+      ['Latitude', property.latitude ? property.latitude.toFixed(6) : 'N/A'],
+      ['Longitude', property.longitude ? property.longitude.toFixed(6) : 'N/A'],
+    ];
+    autoTable(doc, {
+      startY: 30,
+      head: [['Field', 'Value']],
+      body: propertyTable,
+      theme: 'striped',
+      headStyles: { fillColor: [0, 102, 204], textColor: [255, 255, 255] },
+      styles: { cellPadding: 2, fontSize: 10 },
+      margin: { left: margin, right: margin },
     });
-  }
 
-  if (options.includePastRecords && property.past_records.length > 0) {
-    body.push(['\nPast Records']);
-    property.past_records.forEach((record) => {
-      body.push(
-        ['Location', normalizeSuburb(record.suburb)],
-        ['Type', record.property_type || 'N/A'],
-        ['Price', record.price ? formatCurrency(record.price) : 'N/A']
-      );
-    });
-  }
+    // Past Records Section
+    if (options.includePastRecords && property.past_records.length > 0) {
+      doc.addPage();
+      addHeader();
+      addFooter();
+      await addWatermark();
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Past Records', margin, 25);
+      const recordsTable = property.past_records.map(record => [
+        normalizeSuburb(record.suburb),
+        record.property_type || 'N/A',
+        record.price ? formatCurrency(record.price) : 'N/A',
+        record.bedrooms ?? 'N/A',
+        record.bathrooms ?? 'N/A',
+        record.car_garage ?? 'N/A',
+        record.sqm ? `${record.sqm} sqm` : 'N/A',
+        record.landsize ? `${record.landsize} sqm` : 'N/A',
+        record.listing_date ? moment(record.listing_date).format('DD/MM/YYYY') : 'N/A',
+        record.sale_date ? moment(record.sale_date).format('DD/MM/YYYY') : 'N/A',
+        record.status || 'N/A',
+        record.notes || 'N/A',
+      ]);
+      autoTable(doc, {
+        startY: 30,
+        head: [['Location', 'Type', 'Price', 'Beds', 'Baths', 'Garage', 'Floor Area', 'Land Size', 'Listing Date', 'Sale Date', 'Status', 'Notes']],
+        body: recordsTable,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 102, 204], textColor: [255, 255, 255] },
+        styles: { cellPadding: 2, fontSize: 10 },
+        margin: { left: margin, right: margin },
+      });
+    }
 
-  await generatePdf('Property Report', head, body, `property_${property.id}_report.pdf`);
+    // Save the PDF
+    doc.save(`property_${property.id}_report.pdf`);
+    console.log('PDF generated and saved successfully for property ID:', property.id);
+    return true;
+  } catch (err: any) {
+    console.error('PDF generation error:', err.message);
+    throw new Error(`Failed to generate PDF: ${err.message}`);
+  }
 };
 
-// Zoom Controls Component
+// ZoomControls Component
 function ZoomControls() {
   const map = useMap();
 
@@ -182,7 +288,7 @@ function ZoomControls() {
   );
 }
 
-// Map Component
+// PropertyMap Component
 const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => {
   const [showSalesMarkers, setShowSalesMarkers] = useState(true);
 
@@ -192,7 +298,6 @@ const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => 
 
   const center: LatLngTuple = [property.latitude, property.longitude];
 
-  // Custom icons
   const mainIcon = L.divIcon({
     className: 'custom-icon',
     html: `<div style="background-color: #FF0000; width: 24px; height: 24px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>`,
@@ -207,14 +312,11 @@ const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => 
     iconAnchor: [8, 8],
   });
 
-  // Generate Street View URL
   const getStreetViewUrl = (coords: LatLngTuple) => {
     return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${coords[0]},${coords[1]}&fov=80&pitch=0`;
   };
 
-  // Generate Static Street View Image URL (placeholder)
   const getStaticStreetViewUrl = (coords: LatLngTuple) => {
-    // Replace YOUR_API_KEY with a valid Google Maps API key or handle gracefully
     return `https://via.placeholder.com/200x100?text=Street+View+Preview`;
   };
 
@@ -327,199 +429,239 @@ const PropertyMap: React.FC<{ property: ExtendedProperty }> = ({ property }) => 
   );
 };
 
+// Error Boundary Component
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="max-w-4xl mx-auto mt-12 p-6 bg-white rounded-lg shadow-lg">
+          <h1 className="text-2xl font-bold text-red-600">Something went wrong</h1>
+          <p className="text-gray-600 mt-2">{this.state.error || 'An unexpected error occurred'}</p>
+          <p className="text-gray-600 mt-2">Please try navigating back or refreshing the page.</p>
+          <motion.button
+            onClick={() => window.location.href = '/admin-dashboard'}
+            className="mt-4 flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <ArrowLeft className="w-5 h-5 mr-1" /> Back to Agent Dashboard
+          </motion.button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [property, setProperty] = useState<ExtendedProperty | null>(location.state?.property || null);
-  const [loading, setLoading] = useState(!location.state?.property);
+  const [property, setProperty] = useState<ExtendedProperty | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLiked, setIsLiked] = useState(false);
-  const [allPropertyIds, setAllPropertyIds] = useState<string[]>(location.state?.allPropertyIds || []);
+  const [allPropertyIds, setAllPropertyIds] = useState<string[]>([]);
+  const [navLoading, setNavLoading] = useState(true); // Separate loading state for navigation
+  const [debugInfo, setDebugInfo] = useState<string>('');
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('PropertyDetail - ID:', id, 'State property:', property, 'Location state:', location.state);
+    console.log('PropertyDetail - ID:', id, 'Location state:', location.state);
+
     if (!id) {
       console.error('No ID provided in URL');
       setError('Invalid property ID');
       setLoading(false);
+      setNavLoading(false);
+      setDebugInfo('Invalid property ID');
       return;
     }
-    if (!property) {
-      console.log('No state property, fetching from Supabase for ID:', id);
-      fetchProperty();
-    } else {
-      const normalizedProperty: ExtendedProperty = {
-        ...property,
-        suburb: normalizeSuburb(property.suburb),
-        latitude: property.latitude || generateMockCoordinates(property.suburb).latitude,
-        longitude: property.longitude || generateMockCoordinates(property.suburb).longitude,
-        same_street_sales: property.same_street_sales?.map((sale, index) => ({
-          ...sale,
-          suburb: normalizeSuburb(sale.suburb),
-          latitude: sale.latitude || generateMockCoordinates(sale.suburb, index + 1).latitude,
-          longitude: sale.longitude || generateMockCoordinates(sale.suburb, index + 1).longitude,
-        })) || [],
-        past_records: property.past_records?.map(record => ({
+
+    const fetchData = async () => {
+      setLoading(true);
+      setNavLoading(true);
+      setDebugInfo('Fetching data...');
+      try {
+        // Fetch property
+        let fetchedProperty = location.state?.property;
+        if (!fetchedProperty) {
+          console.log('No state property, fetching from Supabase for ID:', id);
+          const { data: propertyData, error: propertyError } = await supabase
+            .from('properties')
+            .select('*, commission')
+            .eq('id', id)
+            .single();
+
+          if (propertyError) {
+            console.error('Supabase property error:', propertyError);
+            throw new Error(`Failed to fetch property: ${propertyError.message}`);
+          }
+          if (!propertyData) {
+            console.error('No property found for ID:', id);
+            throw new Error('Property not found');
+          }
+          fetchedProperty = propertyData;
+          fetchedProperty.suburb = normalizeSuburb(fetchedProperty.suburb);
+          console.log('Fetched property data:', fetchedProperty);
+        }
+
+        // Fetch past records
+        const { data: pastRecords, error: recordsError } = await supabase
+          .from('past_records')
+          .select('suburb, postcode, property_type, price, bedrooms, bathrooms, car_garage, sqm, landsize, listing_date, sale_date, status, notes')
+          .eq('property_id', id);
+
+        if (recordsError) {
+          console.error('Supabase past records error:', recordsError);
+          throw new Error(`Failed to fetch past records: ${recordsError.message}`);
+        }
+
+        const normalizedRecords = pastRecords?.map(record => ({
           ...record,
           suburb: normalizeSuburb(record.suburb),
           postcode: record.postcode || 'N/A',
-        })) || [],
-        features: property.features || [],
-      };
-      setProperty(normalizedProperty);
-      console.log('Normalized state property:', normalizedProperty);
-    }
-  }, [id, property, location.state]);
+        })) || [];
 
-  useEffect(() => {
-    if (!allPropertyIds.length && !loading) {
-      const fetchPropertyIds = async () => {
-        try {
+        const coords = generateMockCoordinates(fetchedProperty.suburb);
+        const enrichedProperty: ExtendedProperty = {
+          ...fetchedProperty,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          same_street_sales: [], // Removed sales data fetching
+          past_records: normalizedRecords,
+          features: fetchedProperty.features || [],
+        };
+
+        console.log('Enriched property:', enrichedProperty);
+        setProperty(enrichedProperty);
+
+        // Fetch all property IDs
+        let propertyIds = location.state?.allPropertyIds || [];
+        if (!propertyIds.length) {
+          console.log('No property IDs in state, fetching from Supabase');
           const { data, error } = await supabase
             .from('properties')
             .select('id')
             .order('created_at', { ascending: false });
-          if (error) throw error;
-          setAllPropertyIds(data.map(item => item.id));
-        } catch (err: any) {
-          console.error('Error fetching property IDs:', err);
+          if (error) {
+            console.error('Supabase property IDs error:', error);
+            throw new Error(`Failed to fetch property IDs: ${error.message}`);
+          }
+          propertyIds = data.map(item => item.id);
+          console.log('Fetched property IDs:', propertyIds);
         }
-      };
-      fetchPropertyIds();
-    }
-  }, [allPropertyIds, loading]);
-
-  const fetchProperty = async () => {
-    setLoading(true);
-    try {
-      console.log('Querying Supabase: properties table, id =', id);
-      const { data: propertyData, error: propertyError } = await supabase
-        .from('properties')
-        .select('*, commission')
-        .eq('id', id)
-        .single();
-
-      if (propertyError) {
-        console.error('Supabase property error:', propertyError);
-        throw propertyError;
+        if (!propertyIds.includes(id)) {
+          console.warn('Current ID not in allPropertyIds, appending:', id);
+          propertyIds = [id, ...propertyIds.filter(pid => pid !== id)]; // Ensure no duplicates
+        }
+        setAllPropertyIds(propertyIds);
+        setDebugInfo(`Fetched property and ${propertyIds.length} IDs`);
+      } catch (err: any) {
+        console.error('Fetch error:', err);
+        setError(err.message || 'Failed to load property details');
+        setDebugInfo(`Error: ${err.message}`);
+      } finally {
+        setLoading(false);
+        setNavLoading(false); // Navigation ready when data is fetched
       }
-      if (!propertyData) {
-        console.error('No property found for ID:', id);
-        throw new Error('Property not found');
-      }
+    };
 
-      propertyData.suburb = normalizeSuburb(propertyData.suburb);
-      console.log('Fetched property data:', propertyData);
+    fetchData();
+  }, [id, location.state]);
 
-      const { data: sameStreetSales, error: salesError } = await supabase
-        .from('properties')
-        .select('address, sale_price, property_type, sale_date, suburb')
-        .eq('street_name', propertyData.street_name)
-        .neq('id', id)
-        .limit(5);
-
-      if (salesError) {
-        console.error('Supabase same street sales error:', salesError);
-        throw salesError;
-      }
-
-      const normalizedSales = sameStreetSales?.map((sale, index) => {
-        const coords = generateMockCoordinates(sale.suburb, index + 1);
-        return {
-          ...sale,
-          suburb: normalizeSuburb(sale.suburb),
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-        };
-      }) || [];
-
-      const { data: pastRecords, error: recordsError } = await supabase
-        .from('past_records')
-        .select('suburb, postcode, property_type, price, bedrooms, bathrooms, car_garage, sqm, landsize, listing_date, sale_date, status, notes')
-        .eq('property_id', id);
-
-      if (recordsError) {
-        console.error('Supabase past records error:', recordsError);
-        throw recordsError;
-      }
-
-      const normalizedRecords = pastRecords?.map(record => ({
-        ...record,
-        suburb: normalizeSuburb(record.suburb),
-        postcode: record.postcode || 'N/A',
-      })) || [];
-
-      const coords = generateMockCoordinates(propertyData.suburb);
-      const enrichedProperty: ExtendedProperty = {
-        ...propertyData,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        same_street_sales: normalizedSales,
-        past_records: normalizedRecords,
-        features: propertyData.features || [],
-      };
-
-      console.log('Enriched property:', enrichedProperty);
-      setProperty(enrichedProperty);
-    } catch (err: any) {
-      console.error('Fetch error:', err);
-      setError(err.message || 'Failed to load property details');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGeneratePDF = () => {
+  const handleGeneratePDF = useCallback(async () => {
     if (!property) {
       console.error('Cannot generate PDF: No property data');
+      setPdfError('No property data available');
+      setDebugInfo('PDF Error: No property data');
       return;
     }
+    setPdfError(null);
     console.log('Generating PDF for property:', property.id);
-    generatePDFReport(property, {
-      includeSameStreetSales: true,
-      includePastRecords: true,
-      includePrediction: false,
-    });
-  };
+    try {
+      await generatePDFReport(property, {
+        includeSameStreetSales: false,
+        includePastRecords: true,
+        includePrediction: false,
+      });
+      setDebugInfo('PDF generated successfully');
+    } catch (err: any) {
+      console.error('PDF generation failed:', err);
+      setPdfError(err.message || 'Failed to generate PDF');
+      setDebugInfo(`PDF Error: ${err.message}`);
+    }
+  }, [property]);
 
-  const handleLike = () => {
+  const handleLike = useCallback(() => {
     setIsLiked(!isLiked);
     console.log(`Property ${property?.id} at ${property?.street_number || 'N/A'} ${property?.street_name || 'N/A'}, ${normalizeSuburb(property?.suburb || '')} ${isLiked ? 'unliked' : 'liked'}`);
-  };
+  }, [isLiked, property]);
 
-  const handleBack = (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    console.log('Back button clicked - Attempting to navigate to /admin-dashboard');
-    console.log('Current location:', location.pathname, 'State:', location.state);
+  const handleBack = useCallback(() => {
+    console.log('Back button clicked - Attempting to navigate to /agent-dashboard');
     try {
-      navigate('/admin-dashboard', { replace: false });
-      console.log('Navigation attempted with react-router-dom to /admin-dashboard');
+      navigate('/agent-dashboard', { replace: false });
     } catch (err) {
-      console.error('react-router-dom navigation failed:', err);
-      console.log('Falling back to window.location.href');
-      window.location.href = '/admin-dashboard';
+      console.error('Navigation to /agent-dashboard failed:', err);
+      navigate('/', { replace: false });
     }
-  };
+  }, [navigate]);
 
-  const currentIndex = allPropertyIds.findIndex(pid => pid === id);
+  const currentIndex = allPropertyIds.findIndex(pid => pid === id) || 0; // Default to 0 if not found
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
+    if (navLoading || allPropertyIds.length <= 1) return;
+    console.log('Next button clicked - Current index:', currentIndex, 'Total IDs:', allPropertyIds.length);
     if (currentIndex < allPropertyIds.length - 1) {
       const nextId = allPropertyIds[currentIndex + 1];
       console.log('Navigating to next property:', nextId);
-      navigate(`/properties/${nextId}`);
+      try {
+        navigate(`/property-detail/${nextId}`, {
+          state: { allPropertyIds, property: null } // Clear property to force fetch
+        });
+      } catch (err) {
+        console.error('Navigation to next property failed:', err);
+        setDebugInfo(`Navigation Error: ${err.message}`);
+      }
+    } else {
+      console.log('Cannot navigate next: At last property');
+      setDebugInfo('Navigation: At last property');
     }
-  };
+  }, [navigate, currentIndex, allPropertyIds, navLoading]);
 
-  const handlePrevious = () => {
+  const handlePrevious = useCallback(() => {
+    if (navLoading || allPropertyIds.length <= 1) return;
+    console.log('Previous button clicked - Current index:', currentIndex, 'Total IDs:', allPropertyIds.length);
     if (currentIndex > 0) {
       const prevId = allPropertyIds[currentIndex - 1];
       console.log('Navigating to previous property:', prevId);
-      navigate(`/properties/${prevId}`);
+      try {
+        navigate(`/property-detail/${prevId}`, {
+          state: { allPropertyIds, property: null } // Clear property to force fetch
+        });
+      } catch (err) {
+        console.error('Navigation to previous property failed:', err);
+        setDebugInfo(`Navigation Error: ${err.message}`);
+      }
+    } else {
+      console.log('Cannot navigate previous: At first property');
+      setDebugInfo('Navigation: At first property');
     }
-  };
+  }, [navigate, currentIndex, allPropertyIds, navLoading]);
 
   if (loading) {
     return (
@@ -569,265 +711,256 @@ export function PropertyDetail() {
   if (error || !property) {
     return (
       <div className="max-w-4xl mx-auto mt-12 p-6 bg-white rounded-lg shadow-lg">
-        <p className="text-red-600 text-center">{error || 'Property not found'}</p>
+        {/* <h1 className="text-2xl font-bold text-red-600">Error</h1> */}
+        {/* <p className="text-gray-600 text-center mt-2">{error || 'Property not found'}</p> */}
+        {/* <p className="text-gray-600 text-center mt-2">Debug Info: {debugInfo}</p> */}
         <motion.button
           onClick={handleBack}
           className="mt-4 flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
         >
-          <ArrowLeft className="w-5 h-5 mr-1" /> Back to Admin Dashboard
+          <ArrowLeft className="w-5 h-5 mr-1" /> Back to Agent Dashboard
         </motion.button>
       </div>
     );
   }
 
   const { commissionRate, commissionEarned } = calculateCommission(property);
+  const propertyStatus = property.sold_date ? 'Sold' : property.listed_date ? 'Listed' : 'Unknown';
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="max-w-4xl mx-auto mt-12 p-6 bg-white rounded-lg shadow-lg"
-    >
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
-          {`${property.street_number || 'N/A'} ${property.street_name || 'N/A'}, ${normalizeSuburb(property.suburb)}`}
-        </h1>
-        <div className="flex gap-2">
-          <motion.button
-            onClick={handleGeneratePDF}
-            className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <Download className="w-5 h-5 mr-2" /> Download PDF
-          </motion.button>
-          <motion.button
-            onClick={handleLike}
-            className={`flex items-center px-4 py-2 rounded-lg ${
-              isLiked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            title={isLiked ? 'Unlike Property' : 'Like Property'}
-          >
-            <Heart
-              className={`w-5 h-5 mr-2 ${isLiked ? 'fill-current' : ''}`}
-            />
-            {isLiked ? 'Unlike' : 'Like'}
-          </motion.button>
+    <ErrorBoundary>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="max-w-4xl mx-auto mt-12 p-6 bg-white rounded-lg shadow-lg"
+      >
+        {/* Debug Info */}
+        <div className="mb-4 p-2 bg-gray-100 rounded">
+          <p className="text-sm text-gray-600">Debug: Current Index: {currentIndex}, Total IDs: {allPropertyIds.length}</p>
+          <p className="text-sm text-gray-600">Debug Info: {debugInfo}</p>
+          {pdfError && <p className="text-sm text-red-600">PDF Error: {pdfError}</p>}
         </div>
-      </div>
 
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-2 flex items-center">
-          <MapPin className="w-5 h-5 mr-2 text-blue-600" />
-          Location Map
-        </h2>
-        <PropertyMap property={property} />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        <div>
-          <p className="flex items-center text-gray-600 mb-2">
-            <MapPin className="w-5 h-5 mr-2" />
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">
             {`${property.street_number || 'N/A'} ${property.street_name || 'N/A'}, ${normalizeSuburb(property.suburb)}`}
-          </p>
-          <p className="flex items-center text-gray-600 mb-2">
-            <DollarSign className="w-5 h-5 mr-2" />
-            {property.price ? formatCurrency(property.price) : 'N/A'}
-          </p>
-          <p className="flex items-center text-gray-600 mb-2">
-            <Home className="w-5 h-5 mr-2" />
-            {property.bedrooms ?? 'N/A'} Beds, {property.bathrooms ?? 'N/A'} Baths, {property.car_garage ?? 'N/A'} Garage
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Type:</strong> {property.property_type || 'N/A'}
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Category:</strong> {property.category || 'N/A'}
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Sale Type:</strong> {property.sale_type || 'N/A'}
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Floor Area:</strong> {property.sqm ? `${property.sqm} sqm` : 'N/A'}
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Land Size:</strong> {property.landsize ? `${property.landsize} sqm` : 'N/A'}
-          </p>
+          </h1>
+          <div className="flex gap-2">
+            <motion.button
+              onClick={handleGeneratePDF}
+              className="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <Download className="w-5 h-5 mr-2" /> Download PDF
+            </motion.button>
+            <motion.button
+              onClick={handleLike}
+              className={`flex items-center px-4 py-2 rounded-lg ${
+                isLiked ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title={isLiked ? 'Unlike Property' : 'Like Property'}
+            >
+              <Heart
+                className={`w-5 h-5 mr-2 ${isLiked ? 'fill-current' : ''}`}
+              />
+              {isLiked ? 'Unlike' : 'Like'}
+            </motion.button>
+          </div>
         </div>
-        <div>
-          <p className="flex items-center text-gray-600 mb-2">
-            <Calendar className="w-5 h-5 mr-2" />
-            Listed: {property.listed_date ? moment(property.listed_date).format('DD/MM/YYYY') : 'N/A'}
-          </p>
-          {property.sold_date && (
-            <p className="text-gray-600 mb-2">
-              <strong>Sold:</strong> {moment(property.sold_date).format('DD/MM/YYYY')}
-            </p>
-          )}
-          <p className="text-gray-600 mb-2">
-            <strong>Expected Price:</strong> {property.expected_price ? formatCurrency(property.expected_price) : 'N/A'}
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Commission:</strong> {commissionRate ? `${commissionRate}%` : 'N/A'}
-          </p>
-          <p className="text-gray-600 mb-2">
-            <strong>Commission Earned:</strong> {commissionEarned ? formatCurrency(commissionEarned) : 'N/A'}
-          </p>
-          <p className="flex items-center text-gray-600 mb-2">
-            <User className="w-5 h-5 mr-2" />
-            <strong>Agent:</strong> {property.agent_name || 'N/A'} ({property.agency_name || 'N/A'})
-          </p>
-          <p className="flex items-center text-gray-600 mb-2">
-            <AlertTriangle className="w-5 h-5 mr-2 text-red-500" />
-            <strong>Flood Risk:</strong> {property.flood_risk || 'N/A'}
-          </p>
-          <p className="flex items-center text-gray-600 mb-2">
-            <Shield className="w-5 h-5 mr-2 text-orange-500" />
-            <strong>Bushfire Risk:</strong> {property.bushfire_risk || 'N/A'}
-          </p>
-          <p className="flex items-center text-gray-600 mb-2">
-            <CheckSquare className="w-5 h-5 mr-2 text-green-500" />
-            <strong>Contract Status:</strong> {property.contract_status || 'N/A'}
-          </p>
-        </div>
-      </div>
 
-      {property.features && property.features.length > 0 && (
+        {/* Property Status */}
+        <div className="mb-4">
+          <span
+            className={`px-3 py-1 rounded-full text-sm font-semibold ${
+              propertyStatus === 'Sold' ? 'bg-green-100 text-green-800' : propertyStatus === 'Listed' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+            }`}
+          >
+            {propertyStatus}
+          </span>
+        </div>
+
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-2 flex items-center">
-            <CheckSquare className="w-5 h-5 mr-2 text-blue-600" />
-            Features
+            <MapPin className="w-5 h-5 mr-2 text-blue-600" />
+            Location Map
           </h2>
-          <div className="grid grid-cols-2 gap-2">
-            {property.features.map((feature, index) => (
-              <div key={index} className="flex items-center text-gray-600">
-                <CheckSquare className="w-4 h-4 mr-2 text-green-500" />
-                <span>{feature}</span>
-              </div>
-            ))}
+          <PropertyMap property={property} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div>
+            <p className="flex items-center text-gray-600 mb-2">
+              <MapPin className="w-5 h-5 mr-2" />
+              {`${property.street_number || 'N/A'} ${property.street_name || 'N/A'}, ${normalizeSuburb(property.suburb)}`}
+            </p>
+            <p className="flex items-center text-gray-600 mb-2">
+              <DollarSign className="w-5 h-5 mr-2" />
+              {property.price ? formatCurrency(property.price) : 'N/A'}
+            </p>
+            <p className="flex items-center text-gray-600 mb-2">
+              <Home className="w-5 h-5 mr-2" />
+              {property.bedrooms ?? 'N/A'} Beds, {property.bathrooms ?? 'N/A'} Baths, {property.car_garage ?? 'N/A'} Garage
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Type:</strong> {property.property_type || 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Category:</strong> {property.category || 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Sale Type:</strong> {property.sale_type || 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Floor Area:</strong> {property.sqm ? `${property.sqm} sqm` : 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Land Size:</strong> {property.landsize ? `${property.landsize} sqm` : 'N/A'}
+            </p>
+          </div>
+          <div>
+            <p className="flex items-center text-gray-600 mb-2">
+              <Calendar className="w-5 h-5 mr-2" />
+              Listed: {property.listed_date ? moment(property.listed_date).format('DD/MM/YYYY') : 'N/A'}
+            </p>
+            {property.sold_date && (
+              <p className="text-gray-600 mb-2">
+                <strong>Sold:</strong> {moment(property.sold_date).format('DD/MM/YYYY')}
+              </p>
+            )}
+            <p className="text-gray-600 mb-2">
+              <strong>Expected Price:</strong> {property.expected_price ? formatCurrency(property.expected_price) : 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Commission:</strong> {commissionRate ? `${commissionRate}%` : 'N/A'}
+            </p>
+            <p className="text-gray-600 mb-2">
+              <strong>Commission Earned:</strong> {commissionEarned ? formatCurrency(commissionEarned) : 'N/A'}
+            </p>
+            <p className="flex items-center text-gray-600 mb-2">
+              <User className="w-5 h-5 mr-2" />
+              <strong>Agent:</strong> {property.agent_name || 'N/A'} ({property.agency_name || 'N/A'})
+            </p>
+            <p className="flex items-center text-gray-600 mb-2">
+              <AlertTriangle className="w-5 h-5 mr-2 text-red-500" />
+              <strong>Flood Risk:</strong> {property.flood_risk || 'N/A'}
+            </p>
+            <p className="flex items-center text-gray-600 mb-2">
+              <Shield className="w-5 h-5 mr-2 text-orange-500" />
+              <strong>Bushfire Risk:</strong> {property.bushfire_risk || 'N/A'}
+            </p>
+            <p className="flex items-center text-gray-600 mb-2">
+              <CheckSquare className="w-5 h-5 mr-2 text-green-500" />
+              <strong>Contract Status:</strong> {property.contract_status || 'N/A'}
+            </p>
           </div>
         </div>
-      )}
 
-      {property.same_street_sales.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Comparable Sales (Same Street)</h2>
-          <div className="overflow-x-auto">
-            <table className="min-w-full bg-white border">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="px-4 py-2 border flex items-center"><MapPin className="w-4 h-4 mr-2" />Address</th>
-                  <th className="px-4 py-2 border flex items-center"><Building className="w-4 h-4 mr-2" />Suburb</th>
-                  <th className="px-4 py-2 border flex items-center"><DollarSign className="w-4 h-4 mr-2" />Sale Price</th>
-                  <th className="px-4 py-2 border flex items-center"><Home className="w-4 h-4 mr-2" />Property Type</th>
-                  <th className="px-4 py-2 border flex items-center"><Calendar className="w-4 h-4 mr-2" />Sale Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {property.same_street_sales.map((sale, index) => (
-                  <tr key={index}>
-                    <td className="px-4 py-2 border">{sale.address || 'N/A'}</td>
-                    <td className="px-4 py-2 border">{normalizeSuburb(sale.suburb)}</td>
-                    <td className="px-4 py-2 border">{sale.sale_price ? formatCurrency(sale.sale_price) : 'N/A'}</td>
-                    <td className="px-4 py-2 border">{sale.property_type || 'N/A'}</td>
-                    <td className="px-4 py-2 border">
-                      {sale.sale_date ? moment(sale.sale_date).format('DD/MM/YYYY') : 'N/A'}
-                    </td>
+        {property.features && property.features.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2 flex items-center">
+              <CheckSquare className="w-5 h-5 mr-2 text-blue-600" />
+              Features
+            </h2>
+            <div className="grid grid-cols-2 gap-2">
+              {property.features.map((feature, index) => (
+                <div key={index} className="flex items-center text-gray-600">
+                  <CheckSquare className="w-4 h-4 mr-2 text-green-500" />
+                  <span>{feature}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {property.past_records.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Past Records</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full bg-white border">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="px-4 py-2 border flex items-center"><MapPin className="w-4 h-4 mr-2" />Location</th>
+                    <th className="px-4 py-2 border flex items-center"><Home className="w-4 h-4 mr-2" />Type</th>
+                    <th className="px-4 py-2 border flex items-center"><DollarSign className="w-4 h-4 mr-2" />Price</th>
+                    <th className="px-4 py-2 border flex items-center"><Bed className="w-4 h-4 mr-2" />Beds</th>
+                    <th className="px-4 py-2 border flex items-center"><Bath className="w-4 h-4 mr-2" />Baths</th>
+                    <th className="px-4 py-2 border flex items-center"><Car className="w-4 h-4 mr-2" />Garage</th>
+                    <th className="px-4 py-2 border flex items-center"><Maximize className="w-4 h-4 mr-2" />Floor Area</th>
+                    <th className="px-4 py-2 border flex items-center"><LandPlot className="w-4 h-4 mr-2" />Land Size</th>
+                    <th className="px-4 py-2 border flex items-center"><Calendar className="w-4 h-4 mr-2" />Listing Date</th>
+                    <th className="px-4 py-2 border flex items-center"><Calendar className="w-4 h-4 mr-2" />Sale Date</th>
+                    <th className="px-4 py-2 border flex items-center"><CheckSquare className="w-4 h-4 mr-2" />Status</th>
+                    <th className="px-4 py-2 border flex items-center"><FileText className="w-4 h-4 mr-2" />Notes</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {property.past_records.map((record, index) => (
+                    <tr key={index}>
+                      <td className="px-4 py-2 border">{normalizeSuburb(record.suburb)}</td>
+                      <td className="px-4 py-2 border">{record.property_type || 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.price ? formatCurrency(record.price) : 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.bedrooms ?? 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.bathrooms ?? 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.car_garage ?? 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.sqm ? `${record.sqm} sqm` : 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.landsize ? `${record.landsize} sqm` : 'N/A'}</td>
+                      <td className="px-4 py-2 border">
+                        {record.listing_date ? moment(record.listing_date).format('DD/MM/YYYY') : 'N/A'}
+                      </td>
+                      <td className="px-4 py-2 border">
+                        {record.sale_date ? moment(record.sale_date).format('DD/MM/YYYY') : 'N/A'}
+                      </td>
+                      <td className="px-4 py-2 border">{record.status || 'N/A'}</td>
+                      <td className="px-4 py-2 border">{record.notes || 'N/A'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 flex justify-between items-center">
+          <motion.button
+            onClick={handleBack}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <ArrowLeft className="w-5 h-5 mr-1" /> Back to Agent Dashboard
+          </motion.button>
+          <div className="flex gap-4">
+            <motion.button
+              onClick={handlePrevious}
+              disabled={navLoading || currentIndex <= 0 || allPropertyIds.length <= 1}
+              className={`flex items-center px-4 py-2 rounded-lg ${
+                navLoading || currentIndex <= 0 || allPropertyIds.length <= 1 ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+              whileHover={{ scale: (navLoading || currentIndex <= 0 || allPropertyIds.length <= 1) ? 1 : 1.05 }}
+              whileTap={{ scale: (navLoading || currentIndex <= 0 || allPropertyIds.length <= 1) ? 1 : 0.95 }}
+            >
+              <ArrowLeft className="w-5 h-5 mr-2" /> Previous
+            </motion.button>
+            <motion.button
+              onClick={handleNext}
+              disabled={navLoading || currentIndex >= allPropertyIds.length - 1 || allPropertyIds.length <= 1}
+              className={`flex items-center px-4 py-2 rounded-lg ${
+                navLoading || currentIndex >= allPropertyIds.length - 1 || allPropertyIds.length <= 1 ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+              whileHover={{ scale: (navLoading || currentIndex >= allPropertyIds.length - 1 || allPropertyIds.length <= 1) ? 1 : 1.05 }}
+              whileTap={{ scale: (navLoading || currentIndex >= allPropertyIds.length - 1 || allPropertyIds.length <= 1) ? 1 : 0.95 }}
+            >
+              Next <ArrowRight className="w-5 h-5 ml-2" />
+            </motion.button>
           </div>
         </div>
-      )}
-
-      {property.past_records.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Past Records</h2>
-          <div className="overflow-x-auto">
-            <table className="min-w-full bg-white border">
-              <thead>
-                <tr className="bg-gray-100">
-                  <th className="px-4 py-2 border flex items-center"><MapPin className="w-4 h-4 mr-2" />Location</th>
-                  <th className="px-4 py-2 border flex items-center"><Home className="w-4 h-4 mr-2" />Type</th>
-                  <th className="px-4 py-2 border flex items-center"><DollarSign className="w-4 h-4 mr-2" />Price</th>
-                  <th className="px-4 py-2 border flex items-center"><Bed className="w-4 h-4 mr-2" />Beds</th>
-                  <th className="px-4 py-2 border flex items-center"><Bath className="w-4 h-4 mr-2" />Baths</th>
-                  <th className="px-4 py-2 border flex items-center"><Car className="w-4 h-4 mr-2" />Garage</th>
-                  <th className="px-4 py-2 border flex items-center"><Maximize className="w-4 h-4 mr-2" />Floor Area</th>
-                  <th className="px-4 py-2 border flex items-center"><LandPlot className="w-4 h-4 mr-2" />Land Size</th>
-                  <th className="px-4 py-2 border flex items-center"><Calendar className="w-4 h-4 mr-2" />Listing Date</th>
-                  <th className="px-4 py-2 border flex items-center"><Calendar className="w-4 h-4 mr-2" />Sale Date</th>
-                  <th className="px-4 py-2 border flex items-center"><CheckSquare className="w-4 h-4 mr-2" />Status</th>
-                  <th className="px-4 py-2 border flex items-center"><FileText className="w-4 h-4 mr-2" />Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {property.past_records.map((record, index) => (
-                  <tr key={index}>
-                    <td className="px-4 py-2 border">{normalizeSuburb(record.suburb)}</td>
-                    <td className="px-4 py-2 border">{record.property_type || 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.price ? formatCurrency(record.price) : 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.bedrooms ?? 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.bathrooms ?? 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.car_garage ?? 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.sqm ? `${record.sqm} sqm` : 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.landsize ? `${record.landsize} sqm` : 'N/A'}</td>
-                    <td className="px-4 py-2 border">
-                      {record.listing_date ? moment(record.listing_date).format('DD/MM/YYYY') : 'N/A'}
-                    </td>
-                    <td className="px-4 py-2 border">
-                      {record.sale_date ? moment(record.sale_date).format('DD/MM/YYYY') : 'N/A'}
-                    </td>
-                    <td className="px-4 py-2 border">{record.status || 'N/A'}</td>
-                    <td className="px-4 py-2 border">{record.notes || 'N/A'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 flex justify-between items-center">
-        <motion.button
-          onClick={handleBack}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          <ArrowLeft className="w-5 h-5 mr-1" /> Back to Admin Dashboard
-        </motion.button>
-        <div className="flex gap-4">
-          <motion.button
-            onClick={handlePrevious}
-            disabled={currentIndex <= 0}
-            className={`flex items-center px-4 py-2 rounded-lg ${
-              currentIndex <= 0 ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-            whileHover={{ scale: currentIndex <= 0 ? 1 : 1.05 }}
-            whileTap={{ scale: currentIndex <= 0 ? 1 : 0.95 }}
-          >
-            <ArrowLeft className="w-5 h-5 mr-2" /> Previous
-          </motion.button>
-          <motion.button
-            onClick={handleNext}
-            disabled={currentIndex >= allPropertyIds.length - 1}
-            className={`flex items-center px-4 py-2 rounded-lg ${
-              currentIndex >= allPropertyIds.length - 1 ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-            whileHover={{ scale: currentIndex >= allPropertyIds.length - 1 ? 1 : 1.05 }}
-            whileTap={{ scale: currentIndex >= allPropertyIds.length - 1 ? 1 : 0.95 }}
-          >
-            Next <ArrowRight className="w-5 h-5 ml-2" />
-          </motion.button>
-        </div>
-      </div>
-    </motion.div>
+      </motion.div>
+    </ErrorBoundary>
   );
 }
