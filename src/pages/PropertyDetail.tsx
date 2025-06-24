@@ -90,7 +90,7 @@ const generatePDFReport = async (
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 15;
-    const companyName = 'Red Tulip Realty';
+    const companyName = 'Red Tulip RealEsatate';
     const reportDate = moment().format('DD/MM/YYYY');
 
     // Add watermark function
@@ -136,7 +136,7 @@ const generatePDFReport = async (
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
-      doc.text('© 2025 Red Tulip Realty', margin, pageHeight - 10);
+      doc.text('© 2025 Red Tulip RealEstate', margin, pageHeight - 10);
     };
 
     // Cover page
@@ -452,7 +452,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
           <p className="text-gray-600 mt-2">{this.state.error || 'An unexpected error occurred'}</p>
           <p className="text-gray-600 mt-2">Please try navigating back or refreshing the page.</p>
           <motion.button
-            onClick={() => window.location.href = '/admin-dashboard'}
+            onClick={() => window.location.href = '/agent-dashboard'}
             className="mt-4 flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}

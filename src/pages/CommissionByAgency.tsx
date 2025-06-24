@@ -497,11 +497,11 @@ function CommissionByAgency() {
     let topAgency = 'Unknown';
     let maxCommission = 0;
     const agencyPropertyCounts: Record<string, number> = {};
-    let topAgent = { name: 'Unknown', commission: 0 };
+    let topAgent = { name: 'Unknown', commission: 0 ,propertyCount: 0};
     const streetMap: Record<string, { listedCount: number; commission: number }> = {};
 
     if (!internalCommissionData || !internalProperties) {
-      return { totalCommission, totalProperties, topAgency, topAgent, agencyPropertyCounts, topStreet: { street: 'None', listedCount: 0, commission: 0 } };
+      return { totalCommission, totalProperties, topAgency,topAgencyPropertyCount:0, topAgent, agencyPropertyCounts, topStreet: { street: 'None', listedCount: 0, commission: 0 } };
     }
 
     Object.keys(internalCommissionData).forEach((agency) => {
@@ -520,7 +520,7 @@ function CommissionByAgency() {
         if (commissionEarned > 0) {
           totalCommission += commissionEarned;
           if (internalAgentData[agent]?.commission > topAgent.commission) {
-            topAgent = { name: agent, commission: internalAgentData[agent].commission };
+            topAgent = { name: agent, commission: internalAgentData[agent].commission ,propertyCount: internalAgentData[agent].listed};
           }
         }
       }
@@ -539,11 +539,11 @@ function CommissionByAgency() {
     });
 
     const topStreet = Object.entries(streetMap).reduce(
-      (max, [street, data]) => (data.listedCount > max.listedCount || (data.listedCount === max.listedCount && data.commission > max.commission) ? { street, ...data } : max),
+      (max, [street, data]) => data.listedCount > max.listedCount || (data.listedCount === max.listedCount && data.commission > max.commission) ? { street, ...data } : max,
       { street: 'None', listedCount: 0, commission: 0 }
     );
 
-    return { totalCommission, totalProperties, topAgency, topAgent, agencyPropertyCounts, topStreet };
+    return { totalCommission, totalProperties, topAgency,topAgencyPropertyCount: agencyPropertyCounts[topAgency] || 0, topAgent, agencyPropertyCounts, topStreet };
   }, [internalCommissionData, internalProperties, internalAgentData, agentCommissions]);
 
   const summary = calculateSummary();
@@ -1044,14 +1044,14 @@ function CommissionByAgency() {
             <div className="p-4 bg-indigo-50 rounded-lg">
               <p className="text-sm text-gray-600">Top Agency</p>
               <p className="text-lg font-semibold text-indigo-600 flex items-center">
-                {summary.topAgency}
+                {summary.topAgency} ({summary.topAgencyPropertyCount} properties)
                 {summary.topAgency === ourAgencyName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
               </p>
             </div>
             <div className="p-4 bg-indigo-50 rounded-lg">
               <p className="text-sm text-gray-600">Top Agent</p>
               <p className="text-lg font-semibold text-indigo-600 flex items-center">
-                {summary.topAgent.name} ({formatCurrency(summary.topAgent.commission)})
+                {summary.topAgent.name} ({formatCurrency(summary.topAgent.commission)})( {summary.topAgent.propertyCount} properties)
                 {summary.topAgent.name === ourAgentName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
               </p>
             </div>

@@ -67,8 +67,6 @@ const ALLOWED_SUBURBS = [
   { name: 'Pinjara Hills', postcode: '4069' },
 ];
 
-const ALLOWED_CATEGORIES = ['Listing', 'Sold'];
-
 export function AgentDashboard() {
   const { profile, user } = useAuthStore();
   const navigate = useNavigate();
@@ -95,6 +93,27 @@ export function AgentDashboard() {
     street_name: '',
     categories: [],
   });
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+  const fetchAvailableCategories = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('category')
+        .not('category', 'is', null);
+      if (error) throw error;
+      const categories = [...new Set(data?.map(d => d.category?.trim()))].filter(c => c);
+      console.debug('Available categories:', categories);
+      setAvailableCategories(categories);
+      return categories;
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      toast.error('Failed to fetch property categories');
+      return [];
+    }
+  }, []);
 
   const fetchPropertiesAndPredict = useCallback(async () => {
     setLoading(true);
@@ -185,14 +204,15 @@ export function AgentDashboard() {
       return;
     }
     if (profile?.role === 'agent') {
-      console.debug('Fetching properties and suburb progress for agent');
+      console.debug('Fetching properties, suburb progress, and categories for agent');
       fetchPropertiesAndPredict();
       fetchSuburbProgress();
+      fetchAvailableCategories();
     } else {
       console.debug('User is not an agent, redirecting to login');
       navigate('/agent-login');
     }
-  }, [profile, user, navigate, fetchPropertiesAndPredict, fetchSuburbProgress]);
+  }, [profile, user, navigate, fetchPropertiesAndPredict, fetchSuburbProgress, fetchAvailableCategories]);
 
   const applyFiltersAndSearch = useCallback(async (query: string = '') => {
     setLoading(true);
@@ -211,17 +231,26 @@ export function AgentDashboard() {
       };
 
       // Log unique suburb and category values in database for debugging
-      const { data: debugData } = await supabase.from('properties').select('suburb, category');
-      console.debug('Database values:', {
-        suburbs: [...new Set(debugData?.map(d => d.suburb))],
-        categories: [...new Set(debugData?.map(d => d.category))],
-      });
-
-      if (filters.categories.length > 0) {
-        const normalizedCategories = filters.categories.map(c => c.toLowerCase());
-        console.debug('Applying category filter:', normalizedCategories);
-        queryBuilder = queryBuilder.in('category', normalizedCategories);
+      const { data: debugData, error: debugError } = await supabase
+        .from('properties')
+        .select('suburb, category');
+      if (debugError) {
+        console.error('Debug data fetch error:', debugError);
+      } else {
+        console.debug('Database values:', {
+          suburbs: [...new Set(debugData?.map(d => d.suburb?.trim()))],
+          categories: [...new Set(debugData?.map(d => d.category?.trim()))],
+        });
       }
+
+      // Apply category filter with case-insensitive matching
+      if (filters.categories.length > 0) {
+        console.debug('Applying category filter:', filters.categories);
+        queryBuilder = queryBuilder.or(
+          filters.categories.map(c => `category.ilike.${c.trim()}`).join(',')
+        );
+      }
+
       if (query.trim()) {
         console.debug('Applying search query:', query.trim());
         queryBuilder = queryBuilder.or(
@@ -250,14 +279,15 @@ export function AgentDashboard() {
       }
       if (filters.suburbs.length > 0) {
         console.debug('Applying suburbs filter:', filters.suburbs);
-        // Use ilike for each suburb to ensure case-insensitive matching
         queryBuilder = queryBuilder.or(
-          filters.suburbs.map(s => `suburb.ilike.${s}`).join(',')
+          filters.suburbs.map(s => `suburb.ilike.${s.trim()}`).join(',')
         );
       }
       if (filters.propertyTypes.length > 0) {
         console.debug('Applying propertyTypes filter:', filters.propertyTypes);
-        queryBuilder = queryBuilder.in('property_type', filters.propertyTypes.map(p => p.toLowerCase()));
+        queryBuilder = queryBuilder.or(
+          filters.propertyTypes.map(p => `property_type.ilike.${p.trim()}`).join(',')
+        );
       }
       if (filters.street_name.trim()) {
         console.debug('Applying street_name filter:', filters.street_name.trim());
@@ -267,13 +297,13 @@ export function AgentDashboard() {
       const { data, error } = await queryBuilder.order('listed_date', { ascending: false });
       if (error) throw error;
 
-      console.debug('Query result:', { data });
+      console.debug('Query result:', { count: data?.length || 0, data });
       setProperties(data || []);
+
       if (data?.length === 0) {
-        const errorMessage = filters.suburbs.length > 0 || filters.categories.length > 0
-          ? `No properties found for ${filters.suburbs.length > 0 ? `suburb(s): ${filters.suburbs.join(', ')}` : ''}${
-              filters.suburbs.length > 0 && filters.categories.length > 0 ? ' and ' : ''
-            }${filters.categories.length > 0 ? `status: ${filters.categories.join(', ')}` : ''}. Try adjusting your filters or check if data exists.`
+        const categories = await fetchAvailableCategories();
+        const errorMessage = filters.categories.length > 0
+          ? `No properties found for status: ${filters.categories.join(', ')}. Available categories: ${categories.join(', ') || 'none'}. Check database or adjust filters.`
           : 'No properties match the applied filters. Try adjusting your filters or check if data exists.';
         setError(errorMessage);
       } else {
@@ -301,7 +331,7 @@ export function AgentDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [filters, searchQuery]);
+  }, [filters, searchQuery, fetchAvailableCategories]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -474,75 +504,171 @@ export function AgentDashboard() {
   };
 
   const generateReport = () => {
+    setIsGeneratingPDF(true);
+    console.debug('Starting PDF generation...');
     try {
-      const doc = new jsPDF();
-      doc.setFontSize(18);
-      doc.text('Agent Property Report', 20, 20);
-      doc.setFontSize(10);
-      doc.text(`Generated on: ${new Date().toLocaleDateString('en-AU')}`, 20, 30);
+      // Verify jsPDF and autoTable availability
+      if (!jsPDF) {
+        throw new Error('jsPDF library is not loaded');
+      }
+      if (!(window as any).jspdf?.autoTable) {
+        throw new Error('jspdf-autotable plugin is not loaded');
+      }
 
-      doc.setFontSize(14);
-      doc.text('Applied Filters', 20, 40);
+      console.debug('Creating new jsPDF instance...');
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 10;
+      let yPos = margin;
+
+      // Validate data
+      console.debug('Validating data...', {
+        properties: properties.length,
+        suburbProgress: suburbProgress.length,
+        filters: Object.keys(filters).length,
+        profile: !!profile,
+      });
+      if (!Array.isArray(properties)) {
+        throw new Error('Properties data is not an array');
+      }
+      if (!Array.isArray(suburbProgress)) {
+        throw new Error('Suburb progress data is not an array');
+      }
+
+      // Set font
+      console.debug('Setting font...');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(16);
+
+      // Header
+      console.debug('Adding header...');
+      doc.setTextColor(0, 0, 0);
+      doc.text('Agent Property Report', margin, yPos);
       doc.setFontSize(10);
-      let yPos = 50;
-      const activeFilters = Object.entries(filters).filter(
-        ([_, value]) => (typeof value === 'string' && value.trim()) || (Array.isArray(value) && value.length > 0)
+      doc.setTextColor(100, 100, 100);
+      doc.text(
+        `Generated on: ${new Date().toLocaleDateString('en-AU')} by ${profile?.name || 'Agent'}`,
+        pageWidth - margin - 60,
+        yPos
       );
-      if (searchQuery.trim()) activeFilters.unshift(['Search', searchQuery]);
-      if (activeFilters.length === 0) {
-        doc.text('No filters applied', 20, yPos);
+      yPos += 15;
+
+      // Summary Statistics (simplified to isolate issue)
+      console.debug('Adding summary statistics...');
+      doc.setFontSize(12);
+      doc.text('Summary Statistics', margin, yPos);
+      yPos += 8;
+      doc.setFontSize(10);
+      const avgPrice = properties.reduce((sum, p) => sum + (p.price || 0), 0) / (properties.length || 1);
+      const stats = [
+        `Total Properties: ${properties.length}`,
+        `Sold Properties: ${properties.filter(p => p.category?.toLowerCase() === 'sold').length}`,
+        `Average Price: ${formatCurrency(avgPrice)}`,
+      ];
+      stats.forEach((stat) => {
+        doc.text(stat, margin, yPos);
+        yPos += 7;
+        if (yPos > pageHeight - margin - 10) {
+          console.debug('Adding new page for stats...');
+          doc.addPage();
+          yPos = margin;
+        }
+      });
+      yPos += 10;
+
+      // Properties Table
+      console.debug('Preparing properties table...');
+      doc.setFontSize(12);
+      doc.text('Properties', margin, yPos);
+      yPos += 8;
+      if (properties.length === 0) {
+        console.debug('No properties to display...');
+        doc.setFontSize(10);
+        doc.text('No properties available', margin, yPos);
+        yPos += 10;
       } else {
-        activeFilters.forEach(([key, value]) => {
-          doc.text(`${key}: ${Array.isArray(value) ? value.join(', ') : value}`, 20, yPos);
-          yPos += 10;
+        // Define table headers and column widths
+        const headers = ['Address', 'Suburb', 'Price', 'Status'];
+        const columnWidths = [60, 40, 40, 30];
+
+        // Prepare table data with strict validation
+        console.debug('Validating table data...');
+        const tableData = properties.map((p, index) => {
+          try {
+            return [
+              `${p.street_number || ''} ${p.street_name || ''}`.trim() || p.address || 'N/A',
+              p.suburb || 'N/A',
+              p.price ? formatCurrency(p.price) : 'N/A',
+              p.category || 'N/A',
+            ];
+          } catch (e) {
+            console.error(`Error processing property at index ${index}:`, p, e);
+            return ['Error', 'Error', 'Error', 'Error'];
+          }
+        });
+
+        console.debug('Generating table with', tableData.length, 'rows...');
+        (doc as any).autoTable({
+          head: [headers],
+          body: tableData,
+          startY: yPos,
+          margin: { left: margin, right: margin },
+          styles: {
+            fontSize: 8,
+            cellPadding: 2,
+            overflow: 'linebreak',
+            minCellHeight: 6,
+          },
+          headStyles: {
+            fillColor: [0, 102, 204],
+            textColor: [255, 255, 255],
+            fontSize: 9,
+            fontStyle: 'bold',
+          },
+          columnStyles: headers.reduce((acc, _, index) => {
+            acc[index] = { cellWidth: columnWidths[index] };
+            return acc;
+          }, {} as Record<number, { cellWidth: number }>),
+          didDrawPage: (data: any) => {
+            console.debug('Table page drawn, updating yPos:', data.cursor.y);
+            yPos = data.cursor.y + 10;
+          },
+          didParseCell: (data: any) => {
+            if (data.section === 'body' && data.cell.text.length > 1) {
+              console.debug(`Parsing cell in column ${data.column.index}:`, data.cell.text);
+              data.cell.text = doc.splitTextToSize(data.cell.text.join(''), columnWidths[data.column.index] - 4);
+            }
+          },
         });
       }
 
-      doc.setFontSize(14);
-      doc.text('Suburb Progress Summary', 20, yPos + 10);
-      doc.setFontSize(10);
-      yPos += 20;
-      suburbProgress.forEach((progress) => {
-        doc.text(`${progress.suburb}:`, 20, yPos);
-        doc.text(`Listed: ${progress.listedProperties}/${progress.totalProperties} (${(progress.listedProperties / (progress.totalProperties || 1) * 100).toFixed(1)}%)`, 40, yPos + 5);
-        doc.text(`Sold: ${progress.soldProperties}/${progress.totalProperties} (${(progress.soldProperties / (progress.totalProperties || 1) * 100).toFixed(1)}%)`, 40, yPos + 10);
-        doc.text(`Conversion Rate: ${progress.conversionRate.toFixed(1)}%`, 40, yPos + 15);
-        doc.text(`Avg Days on Market: ${progress.avgDaysOnMarket}`, 40, yPos + 20);
-        yPos += 30;
+      // Add footer
+      console.debug('Adding footer...');
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin - 20, pageHeight - margin);
+      }
+
+      // Save the PDF
+      console.debug('Saving PDF...');
+      const fileName = `agent_dashboard_report_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
+      console.debug('PDF generated successfully:', fileName);
+      toast.success('PDF report generated successfully!');
+    } catch (error: any) {
+      console.error('Error generating PDF report:', {
+        message: error.message,
+        stack: error.stack,
+        properties: properties.length,
+        suburbProgress: suburbProgress.length,
       });
-
-      doc.setFontSize(14);
-      doc.text('Summary Statistics', 20, yPos + 10);
-      doc.setFontSize(10);
-      yPos += 20;
-      const avgPrice = properties.reduce((sum, p) => sum + (p.price || 0), 0) / (properties.length || 1);
-      doc.text(`Total Properties: ${properties.length}`, 20, yPos);
-      doc.text(`Sold Properties: ${properties.filter(p => p.category?.toLowerCase() === 'sold').length}`, 20, yPos + 10);
-      doc.text(`Average Price: ${formatCurrency(avgPrice)}`, 20, yPos + 20);
-
-      yPos += 30;
-      const tableData = properties.map((p) => [
-        p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A',
-        p.suburb || 'N/A',
-        p.street_name || 'N/A',
-        p.bedrooms?.toString() || 'N/A',
-        p.bathrooms?.toString() || 'N/A',
-        p.car_garage?.toString() || 'N/A',
-        p.price ? formatCurrency(p.price) : 'N/A',
-        p.agent_name || 'N/A',
-        p.category || 'N/A',
-      ]);
-      (doc as any).autoTable({
-        head: [['Address', 'Suburb', 'Street', 'Bedrooms', 'Bathrooms', 'Garage', 'Price', 'Agent', 'Status']],
-        body: tableData,
-        startY: yPos,
-        styles: { fontSize: 8 },
-      });
-
-      doc.save(`agent_dashboard_report_${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (error) {
-      console.error('Error generating PDF report:', error);
-      toast.error('Failed to generate PDF report');
+      toast.error('Failed to generate PDF report. Check console for details.');
+    } finally {
+      setIsGeneratingPDF(false);
     }
   };
 
@@ -553,9 +679,9 @@ export function AgentDashboard() {
         `"${p.street_number && p.street_name ? `${p.street_number} ${p.street_name}` : p.address || 'N/A'}"`,
         `"${p.suburb || 'N/A'}"`,
         `"${p.street_name || 'N/A'}"`,
-        p.bedrooms?.toString() || 'N/A',
-        p.bathrooms?.toString() || 'N/A',
-        p.car_garage?.toString() || 'N/A',
+        p.bedrooms != null ? p.bedrooms.toString() : 'N/A',
+        p.bathrooms != null ? p.bathrooms.toString() : 'N/A',
+        p.car_garage != null ? p.car_garage.toString() : 'N/A',
         p.price ? formatCurrency(p.price) : 'N/A',
         `"${p.agent_name || 'N/A'}"`,
         `"${p.category || 'N/A'}"`,
@@ -711,6 +837,12 @@ export function AgentDashboard() {
           >
             <Mic className="w-6 h-6" />
           </button>
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className="p-2 rounded-full bg-gray-200 hover:bg-gray-300"
+          >
+            {showDebug ? 'Hide Debug' : 'Show Debug'}
+          </button>
         </div>
       </div>
 
@@ -731,6 +863,20 @@ export function AgentDashboard() {
               Retry
             </button>
           </div>
+        </div>
+      )}
+
+      {showDebug && (
+        <div className="bg-yellow-50 p-4 rounded-lg shadow-md mb-8">
+          <h3 className="text-lg font-semibold text-gray-800">Debug Information</h3>
+          <p className="text-sm text-gray-600">Available Categories: {availableCategories.join(', ') || 'None'}</p>
+          <p className="text-sm text-gray-600">Current Filter: {filters.categories.join(', ') || 'None'}</p>
+          <button
+            onClick={fetchAvailableCategories}
+            className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Refresh Categories
+          </button>
         </div>
       )}
 
@@ -763,7 +909,7 @@ export function AgentDashboard() {
           <h3 className="text-lg font-semibold text-gray-800">Market Insights</h3>
           <p className="text-sm text-gray-600">Total Properties: {marketInsights.totalProperties}</p>
           <p className="text-sm text-gray-600">Sold Properties: {marketInsights.soldCount}</p>
-          <p className="text-sm text-gray-600">Avg Price: {formatCurrency(marketInsights.avgPrice)}</p>
+          <p className="text-sm text-gray-600">Average Price: {formatCurrency(marketInsights.avgPrice)}</p>
         </div>
       </div>
 
@@ -1100,11 +1246,15 @@ export function AgentDashboard() {
                   }
                   className="w-full p-2 border rounded h-24"
                 >
-                  {ALLOWED_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
+                  {availableCategories.length > 0 ? (
+                    availableCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))
+                  ) : (
+                    <option disabled>No categories available</option>
+                  )}
                 </select>
               </div>
 
@@ -1121,7 +1271,7 @@ export function AgentDashboard() {
         )}
 
         <div className="flex gap-4 mb-4">
-          {ALLOWED_CATEGORIES.map((category) => (
+          {availableCategories.map((category) => (
             <button
               key={category}
               onClick={() => handleCategoryClick(category)}
@@ -1147,9 +1297,12 @@ export function AgentDashboard() {
         <div className="flex gap-4">
           <button
             onClick={generateReport}
-            className="bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 flex items-center gap-2 shadow-md"
+            disabled={isGeneratingPDF}
+            className={`bg-purple-600 text-white py-2 px-4 rounded-lg flex items-center gap-2 shadow-md ${
+              isGeneratingPDF ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-700'
+            }`}
           >
-            <Download className="w-5 h-5" /> Generate PDF Report
+            <Download className="w-5 h-5" /> {isGeneratingPDF ? 'Generating...' : 'Generate PDF Report'}
           </button>
           <button
             onClick={exportToCSV}
@@ -1211,15 +1364,15 @@ export function AgentDashboard() {
                 <div className="flex items-center text-gray-600 space-x-4 mt-2">
                   <div className="flex items-center">
                     <Home className="w-4 h-4 mr-1" />
-                    <span>{property.bedrooms?.toString() || 'N/A'}</span>
+                    <span>{property.bedrooms != null ? property.bedrooms.toString() : 'N/A'}</span>
                   </div>
                   <div className="flex items-center">
                     <Bath className="w-4 h-4 mr-1" />
-                    <span>{property.bathrooms?.toString() || 'N/A'}</span>
+                    <span>{property.bathrooms != null ? property.bathrooms.toString() : 'N/A'}</span>
                   </div>
                   <div className="flex items-center">
                     <Car className="w-4 h-4 mr-1" />
-                    <span>{property.car_garage?.toString() || 'N/A'}</span>
+                    <span>{property.car_garage != null ? property.car_garage.toString() : 'N/A'}</span>
                   </div>
                 </div>
                 <p className="text-green-600 font-bold mt-2">
