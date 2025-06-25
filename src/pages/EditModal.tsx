@@ -16,8 +16,8 @@ interface EditModalProps {
   setFilteredProperties: React.Dispatch<React.SetStateAction<PropertyDetails[]>>;
   debouncedGenerateMetrics: () => void;
   propertiesTableRef: React.RefObject<HTMLDivElement>;
-  pauseSubscription: () => void; // New prop to pause subscription
-  resumeSubscription: () => void; // New prop to resume subscription
+  pauseSubscription: () => void;
+  resumeSubscription: () => void;
 }
 
 // Utility function for deep comparison and diffing
@@ -96,25 +96,21 @@ export function EditModal({
         agent_name: selectedProperty.agent_name || '',
         price: selectedProperty.price || 0,
         sold_price: selectedProperty.sold_price || undefined,
-        category: selectedProperty.category || '',
-        property_type: selectedProperty.property_type || '',
-        agency_name: selectedProperty.agency_name || '',
-        listed_date: selectedProperty.listed_date || undefined,
-        sold_date: selectedProperty.sold_date || undefined,
-        commission: selectedProperty.commission || undefined,
-        sale_type: selectedProperty.sale_type || '',
-        postcode: selectedProperty.postcode || '',
-        bedrooms: selectedProperty.bedrooms || undefined,
-        bathrooms: selectedProperty.bathrooms || undefined,
-        car_garage: selectedProperty.car_garage || undefined,
-        sqm: selectedProperty.sqm || undefined,
-        landsize: selectedProperty.landsize || undefined,
-        flood_risk: selectedProperty.flood_risk || '',
-        bushfire_risk: selectedProperty.bushfire_risk || '',
-        contract_status: selectedProperty.contract_status || '',
-        features: selectedProperty.features || [],
-        same_street_sales: selectedProperty.same_street_sales || [],
-        past_records: selectedProperty.past_records || [],
+        category: selectedPropertyDetails || '',
+        property_type: '',
+        agency_name: '',
+        listed_date: '',
+        sold_date: undefined,
+        commission: undefined,
+        sale_type: '',
+        postcode: '',
+        bedrooms: undefined,
+        bathrooms: '',
+        car_garage: undefined,
+        sqm: undefined,
+        landsize: undefined,
+        flood_risk: '',
+        property_details: undefined,
       };
       setFormData(initialData);
       setAutoSaveDraft(initialData);
@@ -138,9 +134,9 @@ export function EditModal({
 
   // Keyboard navigation
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !showDeleteConfirm) handleClose();
-      if (e.key === 'Enter' && !showDeleteConfirm && !loading) handleSave(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !showDeleteConfirm) handleCloseModal();
+      if (event.key === 'Enter' && !showDeleteConfirm && !loading) handleSaveModal(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -158,7 +154,7 @@ export function EditModal({
     return errors;
   };
 
-  const handleClose = () => {
+  const handleCloseModal = () => {
     setShowEditModal(false);
     setSelectedProperty(null);
     resetModalState();
@@ -169,7 +165,7 @@ export function EditModal({
     logDebug('Modal closed');
   };
 
-  const handleSave = async (closeAfterSave: boolean = true) => {
+  const handleSaveModal = async (closeAfterSave: boolean = true) => {
     logDebug(`handleSave triggered, closeAfterSave: ${closeAfterSave}`);
     if (!formData || !selectedProperty) {
       toast.error('No property data to save');
@@ -357,27 +353,60 @@ export function EditModal({
   };
 
   const handleDelete = async () => {
-    if (!selectedProperty) return;
+    if (!selectedProperty) {
+      toast.error('No property selected for deletion');
+      logDebug('No selectedProperty for deletion');
+      return;
+    }
 
     setLoading(true);
+    logDebug(`Initiating delete for property ID: ${selectedProperty.id}`);
+
     try {
+      // Store original state for rollback
+      originalStateRef.current = {
+        properties: properties.map((p) => ({ ...p })),
+        filteredProperties: filteredProperties.map((p) => ({ ...p })),
+      };
+      logDebug('Stored original state for rollback');
+
+      // Optimistic UI update
+      const optimisticProperties = properties.filter((p) => p.id !== selectedProperty.id);
+      const optimisticFilteredProperties = filteredProperties.filter(
+        (p) => p.id !== selectedProperty.id
+      );
+      setProperties(optimisticProperties);
+      setFilteredProperties(optimisticFilteredProperties);
+      logDebug('Applied optimistic delete to properties and filteredProperties');
+
+      // Delete from Supabase
       const { error } = await supabase
         .from('properties')
         .delete()
         .eq('id', selectedProperty.id);
 
-      if (error) throw new Error(error.message);
+      if (error) {
+        // Revert optimistic update
+        if (originalStateRef.current) {
+          setProperties(originalStateRef.current.properties);
+          setFilteredProperties(originalStateRef.current.filteredProperties);
+          logDebug('Reverted optimistic delete due to error');
+        }
+        logDebug(`Supabase delete error: ${error.message}`);
+        throw new Error(`Supabase delete failed: ${error.message}`);
+      }
 
-      const updatedProperties = properties.filter((p) => p.id !== selectedProperty.id);
-      const updatedFilteredProperties = filteredProperties.filter((p) => p.id !== selectedProperty.id);
+      // Clean up local storage
+      localStorage.removeItem(`property_draft_${selectedProperty.id}`);
+      logDebug(`Removed draft from localStorage for property ID: ${selectedProperty.id}`);
 
-      setProperties(updatedProperties);
-      setFilteredProperties(updatedFilteredProperties);
       debouncedGenerateMetrics();
       toast.success('Property deleted successfully');
+      logDebug('Property deleted successfully from Supabase');
       handleClose();
     } catch (err: any) {
-      toast.error('Failed to delete property: ' + err.message);
+      console.error('Delete error:', err);
+      toast.error(`Failed to delete property: ${err.message}`);
       logDebug(`Delete error: ${err.message}`);
     } finally {
       setLoading(false);
@@ -883,7 +912,7 @@ export function EditModal({
                         <path
                           className="opacity-75"
                           fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 0 5.373 0 12 h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                         />
                       </svg>
                       Saving...

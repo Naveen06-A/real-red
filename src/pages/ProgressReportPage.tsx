@@ -202,6 +202,7 @@ export function ProgressReportPage() {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
   const [planProgresses, setPlanProgresses] = useState<PlanProgress[]>([]);
+  
 
   // Memoized functions
   const loadMarketingPlans = useCallback(async (agentId: string) => {
@@ -729,8 +730,12 @@ export function ProgressReportPage() {
   }, []);
 
   const generatePDF = useCallback(async (download: boolean = false) => {
-    if (viewMode === 'suburb' && !selectedPlan) return;
+  if (viewMode === 'suburb' && !selectedPlan) {
+    setError('No marketing plan selected for PDF generation.');
+    return;
+  }
 
+  try {
     const head = [
       [
         'Suburb',
@@ -752,10 +757,10 @@ export function ProgressReportPage() {
       selectedPlan.door_knock_streets.forEach((street) => {
         const progress = actualProgress.doorKnocks.streets.find((s) => s.name === street.name);
         body.push([
-          selectedPlan.suburb,
+          selectedPlan.suburb || 'N/A',
           formatDate(selectedPlan.start_date),
           formatDate(selectedPlan.end_date),
-          street.name,
+          street.name || 'N/A',
           'Door Knock',
           (progress?.completedKnocks || 0).toString(),
           (progress?.targetKnocks || 0).toString(),
@@ -769,10 +774,10 @@ export function ProgressReportPage() {
       selectedPlan.phone_call_streets.forEach((street) => {
         const progress = actualProgress.phoneCalls.streets.find((s) => s.name === street.name);
         body.push([
-          selectedPlan.suburb,
+          selectedPlan.suburb || 'N/A',
           formatDate(selectedPlan.start_date),
           formatDate(selectedPlan.end_date),
-          street.name,
+          street.name || 'N/A',
           'Phone Call',
           (progress?.completedCalls || 0).toString(),
           (progress?.targetCalls || 0).toString(),
@@ -788,10 +793,10 @@ export function ProgressReportPage() {
         plan.door_knock_streets.forEach((street) => {
           const progress = overallProgress.doorKnocks.streets.find((s) => s.name.includes(`${plan.suburb}: ${street.name}`));
           body.push([
-            plan.suburb,
+            plan.suburb || 'N/A',
             formatDate(plan.start_date),
             formatDate(plan.end_date),
-            street.name,
+            street.name || 'N/A',
             'Door Knock',
             (progress?.completedKnocks || 0).toString(),
             (progress?.targetKnocks || 0).toString(),
@@ -805,10 +810,10 @@ export function ProgressReportPage() {
         plan.phone_call_streets.forEach((street) => {
           const progress = overallProgress.phoneCalls.streets.find((s) => s.name.includes(`${plan.suburb}: ${street.name}`));
           body.push([
-            plan.suburb,
+            plan.suburb || 'N/A',
             formatDate(plan.start_date),
             formatDate(plan.end_date),
-            street.name,
+            street.name || 'N/A',
             'Phone Call',
             (progress?.completedCalls || 0).toString(),
             (progress?.targetCalls || 0).toString(),
@@ -825,15 +830,23 @@ export function ProgressReportPage() {
 
     if (download) {
       await generatePdf('Marketing Progress Report', head, body, fileName, 'save');
+      setNotification('PDF downloaded successfully.');
+      setTimeout(() => setNotification(null), 3000);
     } else {
       const blob = await generatePdf('Marketing Progress Report', head, body, fileName, 'blob');
       if (blob) {
         const url = URL.createObjectURL(blob);
         setPdfPreviewUrl(url);
         setShowPDFPreview(true);
+      } else {
+        setError('Failed to generate PDF preview.');
       }
     }
-  }, [viewMode, selectedPlan, actualProgress, overallProgress, marketingPlans, planProgresses]);
+  } catch (error) {
+    console.error('Error in generatePDF:', error);
+    setError(`Failed to generate PDF: ${(error as Error).message}`);
+  }
+}, [viewMode, selectedPlan, actualProgress, overallProgress, marketingPlans, planProgresses, formatDate]);
 
   // Memoized progress metrics
   const getProgressMetrics = useMemo(() => {
