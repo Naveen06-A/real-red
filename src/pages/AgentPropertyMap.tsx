@@ -33,6 +33,9 @@ const getMockCoordinates = (suburb: string): LatLngTuple => {
     'pinjarra hills 4069': [-27.5350, 152.9100],
     'moggill qld (4070)': [-27.5700, 152.8700],
     'bellbowrie qld (4070)': [-27.5600, 152.8800],
+    'springfield qld (4300)': { lat: -27.653, lng: 152.918 },
+    'spring mountain qld (4300': { lat: -27.690, lng: 152.895 },
+
     default: [-27.4705, 153.026], // Brisbane default
   };
   const normalizedSuburb = suburb.toLowerCase();

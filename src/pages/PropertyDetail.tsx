@@ -67,6 +67,8 @@ const generateMockCoordinates = (suburb: string = 'Brisbane', index: number = 0)
     'Pinjara Hills 4069': { lat: -27.537, lng: 152.906 },
     'Moggill 4070': { lat: -27.570, lng: 152.874 },
     'Bellbowrie 4070': { lat: -27.559, lng: 152.886 },
+    'Springfield  4300': { lat: -27.653, lng: 152.918 },
+    'Spring Mountain 4300': { lat: -27.690, lng: 152.895 },
   };
   const normalizedSuburb = normalizeSuburb(suburb);
   const base = baseCoords[normalizedSuburb] || { lat: -27.467, lng: 153.028 };

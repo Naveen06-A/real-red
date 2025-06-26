@@ -35,6 +35,8 @@ const PREDEFINED_SUBURBS = [
   'Kenmore Hills QLD 4069',
   'Fig Tree Pocket QLD 4069',
   'Pinjara Hills QLD 4069',
+  'Spring Mountain QLD 4300',
+  'Springfield QLD 4300',
 ];
 interface DoorKnockStreet {
   id: string;

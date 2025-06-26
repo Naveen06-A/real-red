@@ -19,6 +19,8 @@ const generateCoordinates = (suburb: string) => {
     'Chapel Hill QLD 4069': { latitude: -27.5033, longitude: 152.9477 },
     'Kenmore QLD 4069': { latitude: -27.5076, longitude: 152.9388 },
     'Kenmore Hills QLD 4069': { latitude: -27.4988, longitude: 152.9322 },
+    'SPRINGFIELD QLD 4300': { lat: -27.653, lng: 152.918 },
+    'SPRING MOUNTAIN QLD 4300': { lat: -27.690, lng: 152.895 },
   };
   const coords = baseCoords[suburb] || { latitude: -27.5, longitude: 152.9 };
   return {
@@ -39,6 +41,8 @@ const PREDEFINED_SUBURBS = [
   'Kenmore Hills QLD 4069',
   'Fig Tree Pocket QLD 4069',
   'Pinjara Hills QLD 4069',
+  'Spring Mountain QLD 4300',
+  'Springfield QLD 4300'
 ];
 
 interface Property {
@@ -99,6 +103,9 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
       'kenmore hills': 'Kenmore Hills QLD 4069',
       'pinjara hills': 'Pinjara Hills QLD 4069',
       'pinjarra hills': 'Pinjara Hills QLD 4069',
+      'spring mountain' : 'Spring Mountain QLD 4300',
+      'springfield': 'Springfield QLD 4300'
+
     };
 
     return suburbMap[cleanSuburb] || PREDEFINED_SUBURBS.find((s) =>

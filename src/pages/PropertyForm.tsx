@@ -88,6 +88,8 @@ const ALLOWED_SUBURBS = [
   { name: 'Kenmore Hills', postcode: '4069' },
   { name: 'Fig Tree Pocket', postcode: '4069' },
   { name: 'Pinjara Hills', postcode: '4069' },
+  { name:  'Spring Mountain',postcode:'4300'},
+  { name:  'Springfield',postcode:'4300'},
 ];
 
 export function PropertyForm() {

@@ -1,4 +1,3 @@
-// src/utils/suburbUtils.ts
 export const suburbMap: { [key: string]: string } = {
   'moggill': 'MOGGILL QLD 4070',
   'moggill qld': 'MOGGILL QLD 4070',
@@ -33,6 +32,12 @@ export const suburbMap: { [key: string]: string } = {
   'pinjarra hills': 'PINJARRA HILLS QLD (4069)',
   'pinjarra hills qld': 'PINJARRA HILLS QLD (4069)',
   'pinjarra hills qld (4069)': 'PINJARRA HILLS QLD (4069)',
+  'springfield': 'SPRINGFIELD QLD 4300',
+  'springfield qld': 'SPRINGFIELD QLD 4300',
+  'springfield qld (4300)': 'SPRINGFIELD QLD 4300',
+  'spring mountain': 'SPRING MOUNTAIN QLD 4300',
+  'spring mountain qld': 'SPRING MOUNTAIN QLD 4300',
+  'spring mountain qld (4300)': 'SPRING MOUNTAIN QLD 4300',
 };
 
 export const baseCoords: Record<string, { lat: number; lng: number }> = {
@@ -46,6 +51,8 @@ export const baseCoords: Record<string, { lat: number; lng: number }> = {
   'KENMORE HILLS QLD (4069)': { lat: -27.502, lng: 152.929 },
   'FIG TREE POCKET QLD (4069)': { lat: -27.529, lng: 152.961 },
   'PINJARRA HILLS QLD (4069)': { lat: -27.537, lng: 152.906 },
+  'SPRINGFIELD QLD 4300': { lat: -27.653, lng: 152.918 },
+  'SPRING MOUNTAIN QLD 4300': { lat: -27.690, lng: 152.895 },
 };
 
 export const normalizeSuburb = (suburb: string | undefined | null): string => {
