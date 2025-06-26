@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Mic, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car } from 'lucide-react';
+import { Mic, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car, Eye } from 'lucide-react';
 import { IndividualPropertyReport } from './IndividualPropertyReport';
 import { supabase } from '../lib/supabase';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { generatePdf } from '../utils/pdfUtils';
 import { Property } from '../types/Property';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrency } from '../utils/formatters';
@@ -65,8 +64,8 @@ const ALLOWED_SUBURBS = [
   { name: 'Kenmore Hills', postcode: '4069' },
   { name: 'Fig Tree Pocket', postcode: '4069' },
   { name: 'Pinjara Hills', postcode: '4069' },
-  { name: 'Springfield',postcode:'4300'},
-  { name: 'Spring Mountain',postcode:'4300'},
+  { name: 'Springfield', postcode: '4300' },
+  { name: 'Spring Mountain', postcode: '4300' },
 ];
 
 export function AgentDashboard() {
@@ -98,6 +97,8 @@ export function AgentDashboard() {
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null);
 
   const fetchAvailableCategories = useCallback(async () => {
     try {
@@ -106,7 +107,7 @@ export function AgentDashboard() {
         .select('category')
         .not('category', 'is', null);
       if (error) throw error;
-      const categories = [...new Set(data?.map(d => d.category?.trim()))].filter(c => c);
+      const categories = [...new Set(data?.map(d => d.category?.trim()))].filter(c => c) as string[];
       console.debug('Available categories:', categories);
       setAvailableCategories(categories);
       return categories;
@@ -505,170 +506,61 @@ export function AgentDashboard() {
     });
   };
 
-  const generateReport = () => {
+  const generateReport = async (action: 'save' | 'preview') => {
     setIsGeneratingPDF(true);
-    console.debug('Starting PDF generation...');
+    console.debug(`Starting PDF ${action}...`);
     try {
-      // Verify jsPDF and autoTable availability
-      if (!jsPDF) {
-        throw new Error('jsPDF library is not loaded');
-      }
-      if (!(window as any).jspdf?.autoTable) {
-        throw new Error('jspdf-autotable plugin is not loaded');
-      }
-
-      console.debug('Creating new jsPDF instance...');
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 10;
-      let yPos = margin;
-
-      // Validate data
-      console.debug('Validating data...', {
-        properties: properties.length,
-        suburbProgress: suburbProgress.length,
-        filters: Object.keys(filters).length,
-        profile: !!profile,
-      });
-      if (!Array.isArray(properties)) {
-        throw new Error('Properties data is not an array');
-      }
-      if (!Array.isArray(suburbProgress)) {
-        throw new Error('Suburb progress data is not an array');
-      }
-
-      // Set font
-      console.debug('Setting font...');
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(16);
-
-      // Header
-      console.debug('Adding header...');
-      doc.setTextColor(0, 0, 0);
-      doc.text('Agent Property Report', margin, yPos);
-      doc.setFontSize(10);
-      doc.setTextColor(100, 100, 100);
-      doc.text(
-        `Generated on: ${new Date().toLocaleDateString('en-AU')} by ${profile?.name || 'Agent'}`,
-        pageWidth - margin - 60,
-        yPos
-      );
-      yPos += 15;
-
-      // Summary Statistics (simplified to isolate issue)
-      console.debug('Adding summary statistics...');
-      doc.setFontSize(12);
-      doc.text('Summary Statistics', margin, yPos);
-      yPos += 8;
-      doc.setFontSize(10);
-      const avgPrice = properties.reduce((sum, p) => sum + (p.price || 0), 0) / (properties.length || 1);
-      const stats = [
-        `Total Properties: ${properties.length}`,
-        `Sold Properties: ${properties.filter(p => p.category?.toLowerCase() === 'sold').length}`,
-        `Average Price: ${formatCurrency(avgPrice)}`,
-      ];
-      stats.forEach((stat) => {
-        doc.text(stat, margin, yPos);
-        yPos += 7;
-        if (yPos > pageHeight - margin - 10) {
-          console.debug('Adding new page for stats...');
-          doc.addPage();
-          yPos = margin;
+      // Prepare data for the PDF
+      const headers = [['Address', 'Suburb', 'Price', 'Status']];
+      const tableData = properties.map((p, index) => {
+        try {
+          return [
+            `${p.street_number || ''} ${p.street_name || ''}`.trim() || p.address || 'N/A',
+            p.suburb || 'N/A',
+            p.price ? formatCurrency(p.price) : 'N/A',
+            p.category || 'N/A',
+          ];
+        } catch (e) {
+          console.error(`Error processing property at index ${index}:`, p, e);
+          return ['Error', 'Error', 'Error', 'Error'];
         }
       });
-      yPos += 10;
 
-      // Properties Table
-      console.debug('Preparing properties table...');
-      doc.setFontSize(12);
-      doc.text('Properties', margin, yPos);
-      yPos += 8;
-      if (properties.length === 0) {
-        console.debug('No properties to display...');
-        doc.setFontSize(10);
-        doc.text('No properties available', margin, yPos);
-        yPos += 10;
-      } else {
-        // Define table headers and column widths
-        const headers = ['Address', 'Suburb', 'Price', 'Status'];
-        const columnWidths = [60, 40, 40, 30];
-
-        // Prepare table data with strict validation
-        console.debug('Validating table data...');
-        const tableData = properties.map((p, index) => {
-          try {
-            return [
-              `${p.street_number || ''} ${p.street_name || ''}`.trim() || p.address || 'N/A',
-              p.suburb || 'N/A',
-              p.price ? formatCurrency(p.price) : 'N/A',
-              p.category || 'N/A',
-            ];
-          } catch (e) {
-            console.error(`Error processing property at index ${index}:`, p, e);
-            return ['Error', 'Error', 'Error', 'Error'];
-          }
-        });
-
-        console.debug('Generating table with', tableData.length, 'rows...');
-        (doc as any).autoTable({
-          head: [headers],
-          body: tableData,
-          startY: yPos,
-          margin: { left: margin, right: margin },
-          styles: {
-            fontSize: 8,
-            cellPadding: 2,
-            overflow: 'linebreak',
-            minCellHeight: 6,
-          },
-          headStyles: {
-            fillColor: [0, 102, 204],
-            textColor: [255, 255, 255],
-            fontSize: 9,
-            fontStyle: 'bold',
-          },
-          columnStyles: headers.reduce((acc, _, index) => {
-            acc[index] = { cellWidth: columnWidths[index] };
-            return acc;
-          }, {} as Record<number, { cellWidth: number }>),
-          didDrawPage: (data: any) => {
-            console.debug('Table page drawn, updating yPos:', data.cursor.y);
-            yPos = data.cursor.y + 10;
-          },
-          didParseCell: (data: any) => {
-            if (data.section === 'body' && data.cell.text.length > 1) {
-              console.debug(`Parsing cell in column ${data.column.index}:`, data.cell.text);
-              data.cell.text = doc.splitTextToSize(data.cell.text.join(''), columnWidths[data.column.index] - 4);
-            }
-          },
-        });
+      // Validate data
+      if (!Array.isArray(properties) || properties.length === 0) {
+        console.debug('No properties to generate PDF...');
+        toast.warn('No properties available to generate PDF');
+        return;
       }
 
-      // Add footer
-      console.debug('Adding footer...');
-      const pageCount = doc.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
-        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin - 20, pageHeight - margin);
-      }
-
-      // Save the PDF
-      console.debug('Saving PDF...');
+      // Generate PDF using the utility
       const fileName = `agent_dashboard_report_${new Date().toISOString().split('T')[0]}.pdf`;
-      doc.save(fileName);
-      console.debug('PDF generated successfully:', fileName);
-      toast.success('PDF report generated successfully!');
+      const output = action === 'preview' ? 'datauristring' : 'save';
+      const result = await generatePdf(
+        `Agent Property Report - ${profile?.name || 'Agent'}`,
+        headers,
+        tableData,
+        fileName,
+        output
+      );
+
+      if (action === 'preview' && typeof result === 'string') {
+        setPdfDataUrl(result);
+        setShowPreviewModal(true);
+        console.debug('PDF preview generated successfully');
+        toast.success('PDF preview ready!');
+      } else {
+        console.debug('PDF generated successfully:', fileName);
+        toast.success('PDF report downloaded successfully!');
+      }
     } catch (error: any) {
-      console.error('Error generating PDF report:', {
+      console.error(`Error generating PDF ${action}:`, {
         message: error.message,
         stack: error.stack,
         properties: properties.length,
         suburbProgress: suburbProgress.length,
       });
-      toast.error('Failed to generate PDF report. Check console for details.');
+      toast.error(`Failed to generate PDF ${action}. Check console for details.`);
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -829,6 +721,43 @@ export function AgentDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-6">
+      {/* Modal for PDF Preview */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-xl font-semibold text-gray-800">PDF Preview</h2>
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="text-gray-600 hover:text-gray-800"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="flex-grow p-4">
+              {pdfDataUrl ? (
+                <iframe
+                  src={pdfDataUrl}
+                  className="w-full h-full border-0"
+                  title="PDF Preview"
+                />
+              ) : (
+                <p className="text-gray-600">Loading preview...</p>
+              )}
+            </div>
+            <div className="flex justify-end p-4 border-t">
+              <button
+                onClick={() => generateReport('save')}
+                className="bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 flex items-center gap-2"
+                disabled={isGeneratingPDF}
+              >
+                <Download className="w-5 h-5" /> Download PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-800">Agent Dashboard</h1>
         <div className="flex items-center space-x-4">
@@ -1298,13 +1227,22 @@ export function AgentDashboard() {
 
         <div className="flex gap-4">
           <button
-            onClick={generateReport}
+            onClick={() => generateReport('preview')}
+            disabled={isGeneratingPDF}
+            className={`bg-blue-600 text-white py-2 px-4 rounded-lg flex items-center gap-2 shadow-md ${
+              isGeneratingPDF ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
+            }`}
+          >
+            <Eye className="w-5 h-5" /> {isGeneratingPDF ? 'Generating...' : 'Preview PDF Report'}
+          </button>
+          <button
+            onClick={() => generateReport('save')}
             disabled={isGeneratingPDF}
             className={`bg-purple-600 text-white py-2 px-4 rounded-lg flex items-center gap-2 shadow-md ${
               isGeneratingPDF ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-700'
             }`}
           >
-            <Download className="w-5 h-5" /> {isGeneratingPDF ? 'Generating...' : 'Generate PDF Report'}
+            <Download className="w-5 h-5" /> {isGeneratingPDF ? 'Generating...' : 'Download PDF Report'}
           </button>
           <button
             onClick={exportToCSV}
