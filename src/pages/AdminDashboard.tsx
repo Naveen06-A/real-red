@@ -3,45 +3,20 @@ import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UserPlus, Home, FileText, Activity, BarChart, Copy } from 'lucide-react';
+import { UserPlus, Home, FileText, Activity, BarChart } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
-
-interface Agent {
-  id: string;
-  email: string;
-  name: string;
-  phone: string;
-}
-
-interface Property {
-  id: string;
-  street_number: string;
-  street_name: string;
-  suburb: string;
-  property_type: string;
-  price: number;
-  bedrooms: number;
-  bathrooms: number;
-  car_garage: number;
-  category: string;
-  agent_id: string | null;
-}
+import { CreateAgentModal } from '../components/CreateAgentModal';
+import { Agent, Property } from '../types';
 
 export function AdminDashboard() {
-  const { user } = useAuthStore();
+  const { user, profile } = useAuthStore();
   const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
-  const [marketingPlans, setMarketingPlans] = useState<any[]>([]);
-  const [activityData, setActivityData] = useState<any[]>([]);
-  const [progressData, setProgressData] = useState<any[]>([]);
-  const [reportData, setReportData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showModal, setShowModal] = useState<'agent' | 'property' | 'marketing' | 'activity' | 'progress' | 'report' | null>(null);
-  const [newAgentDetails, setNewAgentDetails] = useState({ email: '', name: '', phone: '', password: '' });
-  const [showPassword, setShowPassword] = useState(false);
+  const [showModal, setShowModal] = useState<'agent' | 'property' | null>(null);
   const [propertyData, setPropertyData] = useState({
     street_number: '',
     street_name: '',
@@ -54,45 +29,19 @@ export function AdminDashboard() {
     category: '',
     agent_id: '',
   });
-  // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(5);
   const [jumpToPage, setJumpToPage] = useState('');
 
   const dashboardLinks = [
-    { name: 'Create New Agent', icon: UserPlus, modal: 'agent' },
-    { name: 'Add Property', path: '/property-form', icon: Home },
+    { name: 'Create New Agent', icon: UserPlus, action: () => setShowModal('agent') }, // Trigger modal
+    { name: 'Add Property', icon: Home, action: () => setShowModal('property') }, // Trigger property modal
     { name: 'Create Marketing Plan', path: '/marketing-plan', icon: FileText },
     { name: 'Activity Log', path: '/activity-logger', icon: Activity },
     { name: 'Progress Report', path: '/progress-report-page', icon: BarChart },
     { name: 'Reports', path: '/reports', icon: FileText },
-    {name:'Agent Report',path:'/agent-reports',icon:FileText},
+    { name: 'Agent Report', path: '/agent-reports', icon: FileText },
   ];
-
-  const fetchMarketingPlans = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('marketing_plans')
-        .select('id')
-        .eq('agent', user?.id);
-      if (error) throw error;
-      return data.length > 0;
-    } catch (error) {
-      return false;
-    }
-  };
-
-  useEffect(() => {
-    if (user?.role === 'admin') {
-      fetchMarketingPlans().then((hasPlans) => {
-        if (!hasPlans) {
-          setDashboardLinks((prev) =>
-            prev.filter((link) => link.name !== 'Activity Log')
-          );
-        }
-      });
-    }
-  }, [user]);
 
   const fetchAgents = async () => {
     try {
@@ -102,7 +51,6 @@ export function AdminDashboard() {
         .eq('role', 'agent');
       if (error) throw error;
       setAgents(data || []);
-      console.log('Fetched agents:', data);
       setError(null);
       return data;
     } catch (error: any) {
@@ -116,11 +64,10 @@ export function AdminDashboard() {
     try {
       const { data, error } = await supabase
         .from('properties')
-        .select('id, street_number, street_name, suburb, property_type, price, bedrooms, bathrooms, car_garage, category, agent_id,agent_name')
+        .select('id, street_number, street_name, suburb, property_type, price, bedrooms, bathrooms, car_garage, category, agent_id, agent_name')
         .order('created_at', { ascending: false });
       if (error) throw error;
       setProperties(data || []);
-      console.log('Fetched properties:', data);
       setError(null);
     } catch (error: any) {
       toast.error('Failed to fetch properties: ' + error.message);
@@ -129,55 +76,16 @@ export function AdminDashboard() {
   };
 
   useEffect(() => {
-  const loadData = async () => {
-    setLoading(true);
-    await fetchAgents(); // Fetch agents first
-    await fetchProperties(); // Then fetch properties
-    // Fetch all property IDs for navigation
-    const { data: propertyIdsData, error: propertyIdsError } = await supabase
-      .from('properties')
-      .select('id')
-      .order('created_at', { ascending: false });
-    if (propertyIdsError) {
-      toast.error('Failed to fetch property IDs: ' + propertyIdsError.message);
-    } else {
-      setAllPropertyIds(propertyIdsData.map(item => item.id));
-    }
-    setLoading(false);
-  };
-  loadData();
-}, []);
-
-  const [allPropertyIds, setAllPropertyIds] = useState<string[]>([]);
-
-
-
-  const handleCreateAgent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: newAgentDetails.email,
-        password: newAgentDetails.password,
-        options: {
-          data: {
-            name: newAgentDetails.name,
-            phone: newAgentDetails.phone,
-            role: 'agent',
-          },
-        },
-      });
-      if (error) throw error;
-      toast.success('Agent created successfully!');
-      setShowModal(null);
+    const loadData = async () => {
+      setLoading(true);
       await fetchAgents();
-      await fetchProperties(); // Refresh properties to ensure agent assignments are updated
-    } catch (error: any) {
-      toast.error('Failed to create agent: ' + error.message);
-    } finally {
+      await fetchProperties();
       setLoading(false);
+    };
+    if (profile?.role === 'admin') {
+      loadData();
     }
-  };
+  }, [profile]);
 
   const handleCreateProperty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,12 +140,6 @@ export function AdminDashboard() {
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success('Copied to clipboard!');
-  };
-
-  // Pagination logic
   const totalPages = Math.ceil(properties.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -251,7 +153,7 @@ export function AdminDashboard() {
 
   const handleItemsPerPageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setItemsPerPage(parseInt(e.target.value));
-    setCurrentPage(1); // Reset to first page
+    setCurrentPage(1);
   };
 
   const handleJumpToPage = (e: React.FormEvent) => {
@@ -281,6 +183,15 @@ export function AdminDashboard() {
     return pages;
   };
 
+  if (!profile || profile.role !== 'admin') {
+    return (
+      <div className="min-h-screen bg-gray-100 p-8 text-center">
+        <h1 className="text-2xl font-bold text-red-600">Access Denied</h1>
+        <p>Only admins can access this dashboard.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 p-8">
       <div className="flex justify-between items-center mb-8">
@@ -302,8 +213,9 @@ export function AdminDashboard() {
             className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer"
             whileHover={{ scale: 1.05 }}
             onClick={() => {
-              if (link.modal) {
-                setShowModal(link.modal);
+              console.log('Clicked:', link.name); // Debug log
+              if (link.action) {
+                link.action();
               } else if (link.path) {
                 navigate(link.path);
               }
@@ -317,70 +229,12 @@ export function AdminDashboard() {
         ))}
       </div>
 
-      {showModal === 'agent' && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg max-w-md w-full">
-            <h2 className="text-2xl font-semibold mb-4">Create New Agent</h2>
-            <form onSubmit={handleCreateAgent}>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">Email</label>
-                <input
-                  type="email"
-                  value={newAgentDetails.email}
-                  onChange={(e) => setNewAgentDetails({ ...newAgentDetails, email: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required
-                />
-              </div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">Name</label>
-                <input
-                  type="text"
-                  value={newAgentDetails.name}
-                  onChange={(e) => setNewAgentDetails({ ...newAgentDetails, name: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required
-                />
-              </div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700">Phone</label>
-                <input
-                  type="tel"
-                  value={newAgentDetails.phone}
-                  onChange={(e) => setNewAgentDetails({ ...newAgentDetails, phone: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required
-                />
-              </div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium">Password</label>
-                <input
-                  type="text"
-                  value="••••••••"
-                  readOnly
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100"
-                />
-              </div>
-              <div className="flex justify-end gap-4">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(null)}
-                  className="px-4 py-2 text-gray-600 rounded-md hover:bg-gray-100"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {loading ? 'Creating...' : 'Create Agent'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CreateAgentModal
+        isOpen={showModal === 'agent'}
+        onClose={() => setShowModal(null)}
+        fetchAgents={fetchAgents}
+        fetchProperties={fetchProperties}
+      />
 
       {showModal === 'property' && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
@@ -578,9 +432,7 @@ export function AdminDashboard() {
                   </thead>
                   <tbody>
                     {currentProperties.map((property) => {
-                      console.log(`Property ID: ${property.id}, Agent ID: ${property.agent_id}`);
                       const agent = property.agent_id ? agents.find((a) => a.id === property.agent_id) : null;
-                      console.log(`Agent found for ${property.id}:`, agent);
                       return (
                         <motion.tr
                           key={property.id}
@@ -616,7 +468,6 @@ export function AdminDashboard() {
               </motion.div>
             </AnimatePresence>
 
-            {/* Pagination Controls */}
             <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-gray-700">Items per page:</label>

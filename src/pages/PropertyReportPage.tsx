@@ -13,9 +13,30 @@ import {
 } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { motion, AnimatePresence } from 'framer-motion';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { ChevronDown, Download, Filter, Loader2, RefreshCcw, Trash2, X, Edit, MapPin, Home, DollarSign, Percent, Briefcase, Calendar, Shield, CheckSquare, List, BarChart2, TrendingUp, FileText } from 'lucide-react';
+import {
+  ChevronDown,
+  Download,
+  Filter,
+  Loader2,
+  RefreshCcw,
+  Trash2,
+  X,
+  Edit,
+  MapPin,
+  Home,
+  DollarSign,
+  Percent,
+  Briefcase,
+  Calendar,
+  Shield,
+  CheckSquare,
+  List,
+  BarChart2,
+  TrendingUp,
+  FileText,
+} from 'lucide-react';
 import moment from 'moment';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
@@ -24,7 +45,16 @@ import Select from 'react-select';
 import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
-import { calculateCommission, formatArray, formatCurrency, formatDate, generateHeatmapData, generatePriceTrendsData, normalizeSuburb, selectStyles } from '../reportsUtils';
+import {
+  calculateCommission,
+  formatArray,
+  formatCurrency,
+  formatDate,
+  generateHeatmapData,
+  generatePriceTrendsData,
+  normalizeSuburb,
+  selectStyles,
+} from '../reportsUtils';
 import { generatePdf } from '../utils/pdfUtils';
 import { Filters, PropertyDetails } from './Reports';
 
@@ -43,8 +73,7 @@ ChartJS.register(
 
 const ITEMS_PER_PAGE = 10;
 
-interface PropertyReportPageProps {
-}
+interface PropertyReportPageProps {}
 
 interface PropertyFormData {
   id: string;
@@ -104,6 +133,8 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   const [localFilterPreviewCount, setLocalFilterPreviewCount] = useState(filterPreviewCount || 0);
   const [localCurrentPage, setLocalCurrentPage] = useState(currentPage || 1);
   const [exportLoading, setExportLoading] = useState(false);
+  const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [expandedFilters, setExpandedFilters] = useState({
     suburbs: false,
     streetNames: false,
@@ -125,6 +156,15 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   });
 
   const propertiesTableRef = useRef<HTMLDivElement>(null);
+
+  // Cleanup PDF URL to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [pdfUrl]);
 
   useEffect(() => {
     if (filteredProperties.length === 0 && initialFilteredProperties.length > 0) {
@@ -470,9 +510,30 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     try {
       const head = [
         [
-          'Street Number', 'Street Name', 'Suburb', 'Postcode', 'Agent', 'Type', 'Price', 'Sold Price', 'Status',
-          'Commission (%)', 'Commission Earned', 'Agency', 'Expected Price', 'Sale Type', 'Bedrooms', 'Bathrooms',
-          'Car Garage', 'SQM', 'Land Size', 'Listed Date', 'Sold Date', 'Flood Risk', 'Bushfire Risk', 'Contract Status',
+          'Street Number',
+          'Street Name',
+          'Suburb',
+          'Postcode',
+          'Agent',
+          'Type',
+          'Price',
+          'Sold Price',
+          'Status',
+          'Commission (%)',
+          'Commission Earned',
+          'Agency',
+          'Expected Price',
+          'Sale Type',
+          'Bedrooms',
+          'Bathrooms',
+          'Car Garage',
+          'SQM',
+          'Land Size',
+          'Listed Date',
+          'Sold Date',
+          'Flood Risk',
+          'Bushfire Risk',
+          'Contract Status',
           'Features',
         ],
       ];
@@ -491,11 +552,11 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         prop.agency_name || 'N/A',
         prop.expected_price ? formatCurrency(prop.expected_price) : 'N/A',
         prop.sale_type || 'N/A',
-        prop.bedrooms ?? 'N/A',
-        prop.bathrooms ?? 'N/A',
-        prop.car_garage ?? 'N/A',
-        prop.sqm ?? 'N/A',
-        prop.landsize ?? 'N/A',
+        String(prop.bedrooms ?? 'N/A'),
+        String(prop.bathrooms ?? 'N/A'),
+        String(prop.car_garage ?? 'N/A'),
+        String(prop.sqm ?? 'N/A'),
+        String(prop.landsize ?? 'N/A'),
         formatDate(prop.listed_date),
         formatDate(prop.sold_date),
         prop.flood_risk || 'N/A',
@@ -504,11 +565,107 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         formatArray(prop.features || []),
       ]);
 
-      await generatePdf('Property Report', head, body, 'property_report.pdf');
-      toast.success('PDF exported successfully');
-    } catch (err) {
-      toast.error('Failed to export PDF');
+      console.log('Generating PDF with head:', head);
+      console.log('Generating PDF with body sample:', body.slice(0, 2));
+
+      const pdfBlob = await generatePdf('Property Report', head, body, 'property_report.pdf', 'blob');
+      if (pdfBlob instanceof Blob) {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'property_report.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success('PDF downloaded successfully');
+      } else {
+        throw new Error('PDF generation did not return a Blob');
+      }
+    } catch (err: any) {
       console.error('PDF export error:', err);
+      toast.error(err.message || 'Failed to export PDF');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const previewPropertyReportPDF = async () => {
+    if (!propertyMetrics) {
+      toast.error('No property metrics available for preview');
+      return;
+    }
+    setExportLoading(true);
+    try {
+      const head = [
+        [
+          'Street Number',
+          'Street Name',
+          'Suburb',
+          'Postcode',
+          'Agent',
+          'Type',
+          'Price',
+          'Sold Price',
+          'Status',
+          'Commission (%)',
+          'Commission Earned',
+          'Agency',
+          'Expected Price',
+          'Sale Type',
+          'Bedrooms',
+          'Bathrooms',
+          'Car Garage',
+          'SQM',
+          'Land Size',
+          'Listed Date',
+          'Sold Date',
+          'Flood Risk',
+          'Bushfire Risk',
+          'Contract Status',
+          'Features',
+        ],
+      ];
+      const body = filteredProperties.map((prop: PropertyDetails) => [
+        prop.street_number || 'N/A',
+        prop.street_name || 'N/A',
+        normalizeSuburb(prop.suburb || ''),
+        prop.postcode || 'N/A',
+        prop.agent_name || 'N/A',
+        prop.property_type || 'N/A',
+        formatCurrency(prop.price || 0),
+        prop.sold_price ? formatCurrency(prop.sold_price) : 'N/A',
+        prop.category || 'N/A',
+        prop.commission ? `${prop.commission}%` : 'N/A',
+        prop.commission_earned ? formatCurrency(prop.commission_earned) : 'N/A',
+        prop.agency_name || 'N/A',
+        prop.expected_price ? formatCurrency(prop.expected_price) : 'N/A',
+        prop.sale_type || 'N/A',
+        String(prop.bedrooms ?? 'N/A'),
+        String(prop.bathrooms ?? 'N/A'),
+        String(prop.car_garage ?? 'N/A'),
+        String(prop.sqm ?? 'N/A'),
+        String(prop.landsize ?? 'N/A'),
+        formatDate(prop.listed_date),
+        formatDate(prop.sold_date),
+        prop.flood_risk || 'N/A',
+        prop.bushfire_risk || 'N/A',
+        prop.contract_status || 'N/A',
+        formatArray(prop.features || []),
+      ]);
+
+      console.log('Generating PDF preview with head:', head);
+      console.log('Generating PDF preview with body sample:', body.slice(0, 2));
+
+      const pdfDataUri = await generatePdf('Property Report', head, body, 'property_report.pdf', 'datauristring');
+      if (typeof pdfDataUri === 'string') {
+        setPdfUrl(pdfDataUri);
+        setIsPdfPreviewOpen(true);
+        toast.success('PDF preview generated successfully');
+      } else {
+        throw new Error('PDF generation did not return a data URI');
+      }
+    } catch (err: any) {
+      console.error('PDF preview error:', err);
+      toast.error(err.message || 'Failed to generate PDF preview');
     } finally {
       setExportLoading(false);
     }
@@ -528,9 +685,30 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         [],
         ['Property Details'],
         [
-          'Street Number', 'Street Name', 'Suburb', 'Postcode', 'Agent', 'Type', 'Price', 'Sold Price', 'Status',
-          'Commission (%)', 'Commission Earned', 'Agency', 'Expected Price', 'Sale Type', 'Bedrooms', 'Bathrooms',
-          'Car Garage', 'SQM', 'Land Size', 'Listed Date', 'Sold Date', 'Flood Risk', 'Bushfire Risk', 'Contract Status',
+          'Street Number',
+          'Street Name',
+          'Suburb',
+          'Postcode',
+          'Agent',
+          'Type',
+          'Price',
+          'Sold Price',
+          'Status',
+          'Commission (%)',
+          'Commission Earned',
+          'Agency',
+          'Expected Price',
+          'Sale Type',
+          'Bedrooms',
+          'Bathrooms',
+          'Car Garage',
+          'SQM',
+          'Land Size',
+          'Listed Date',
+          'Sold Date',
+          'Flood Risk',
+          'Bushfire Risk',
+          'Contract Status',
           'Features',
         ],
         ...filteredProperties.map((prop: PropertyDetails) => [
@@ -548,11 +726,11 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           prop.agency_name || 'N/A',
           prop.expected_price ? formatCurrency(prop.expected_price) : 'N/A',
           prop.sale_type || 'N/A',
-          prop.bedrooms ?? 'N/A',
-          prop.bathrooms ?? 'N/A',
-          prop.car_garage ?? 'N/A',
-          prop.sqm ?? 'N/A',
-          prop.landsize ?? 'N/A',
+          String(prop.bedrooms ?? 'N/A'),
+          String(prop.bathrooms ?? 'N/A'),
+          String(prop.car_garage ?? 'N/A'),
+          String(prop.sqm ?? 'N/A'),
+          String(prop.landsize ?? 'N/A'),
           formatDate(prop.listed_date),
           formatDate(prop.sold_date),
           prop.flood_risk || 'N/A',
@@ -914,7 +1092,19 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
               </motion.div>
             )}
             <motion.button
-              onClick={() => exportPropertyReportPDF()}
+              onClick={previewPropertyReportPDF}
+              className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title="Preview property report as PDF"
+              aria-label="Preview as PDF"
+              disabled={exportLoading}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Preview PDF
+            </motion.button>
+            <motion.button
+              onClick={exportPropertyReportPDF}
               className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -926,7 +1116,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
               PDF
             </motion.button>
             <motion.button
-              onClick={() => exportPropertyReportCSV()}
+              onClick={exportPropertyReportCSV}
               className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -938,7 +1128,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
               CSV
             </motion.button>
             <motion.button
-              onClick={() => exportPropertyReportHTML()}
+              onClick={exportPropertyReportHTML}
               className="flex items-center px-5 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:from-blue-600 hover:to-blue-700 transition-all"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -951,6 +1141,61 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
             </motion.button>
           </div>
         </div>
+
+        <AnimatePresence>
+          {isPdfPreviewOpen && (
+            <motion.div
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <motion.div
+                className="bg-white p-8 rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto"
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <h3 className="text-2xl font-semibold text-blue-800 mb-6 flex items-center">
+                  <FileText className="w-8 h-8 mr-3 text-blue-600" />
+                  PDF Preview
+                </h3>
+                {pdfUrl && (
+                  <iframe
+                    src={pdfUrl}
+                    className="w-full h-[80vh] border border-gray-200"
+                    title="PDF Preview"
+                  />
+                )}
+                <div className="mt-6 flex justify-end space-x-4">
+                  <motion.button
+                    onClick={() => {
+                      setIsPdfPreviewOpen(false);
+                      setPdfUrl(null);
+                    }}
+                    className="px-6 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    Close
+                  </motion.button>
+                  <motion.button
+                    onClick={exportPropertyReportPDF}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    disabled={exportLoading}
+                  >
+                    <Download className="w-5 h-5 inline-block mr-2" />
+                    Download PDF
+                  </motion.button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {propertyMetrics ? (
           <>

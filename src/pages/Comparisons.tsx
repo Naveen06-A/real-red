@@ -1,8 +1,7 @@
-
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, Loader2, RefreshCw, Moon, Sun, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Star } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, Moon, Sun, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Star, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -188,7 +187,6 @@ const AgencyCard: React.FC<AgencyCardProps> = ({ item, index, globalIndex, maxSo
       }`}
       initial={{ opacity: 0, x: 50 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -50 }}
       transition={{ duration: 0.3, delay: index * 0.1 }}
     >
       {isOurAgency && (
@@ -242,6 +240,8 @@ export function ComparisonReport() {
     suburb: true,
   });
   const [currentPage, setCurrentPage] = useState(1);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const itemsPerPage = 5;
   const { user } = useAuthStore((state: { user: User | null }) => ({ user: state.user }));
   const navigate = useNavigate();
@@ -531,6 +531,21 @@ export function ComparisonReport() {
     return comparisonMetrics.agencyComparison.slice(start, end);
   }, [comparisonMetrics, currentPage]);
 
+  // Calculate visible page numbers for pagination
+  const visiblePages = useMemo(() => {
+    if (totalPages <= 3) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    let startPage = Math.max(1, currentPage - 1);
+    let endPage = Math.min(totalPages, currentPage + 1);
+    if (currentPage === 1) {
+      endPage = 3;
+    } else if (currentPage === totalPages) {
+      startPage = totalPages - 2;
+    }
+    return Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+  }, [currentPage, totalPages]);
+
   // Chart Data
   const agencyChartData = useMemo(() => {
     if (!comparisonMetrics) return { labels: [], datasets: [] };
@@ -578,16 +593,38 @@ export function ComparisonReport() {
     };
   }, [comparisonMetrics, ourAgencyName]);
 
-  // Export to PDF
-  const exportToPDF = () => {
-    if (!comparisonMetrics) return;
+  // Generate PDF (used for both export and preview)
+  const generatePDF = () => {
+    if (!comparisonMetrics) return null;
     const doc = new jsPDF() as JsPDFWithAutoTable;
+    const totalPages = doc.internal.getNumberOfPages();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Defining addFooter function to add consistent pagination
+    const addFooter = (page: number) => {
+      doc.setPage(page);
+      doc.setFillColor(191, 219, 254); // #BFDBFE
+      doc.circle(pageWidth - 20, pageHeight - 15, 10, 'F'); // Circular badge
+      doc.setFontSize(10);
+      doc.setTextColor(30, 64, 175); // #1E3A8A
+      doc.setFont('Inter', 'normal');
+      doc.text(`Page ${page} of ${totalPages}`, pageWidth - 20, pageHeight - 15, { align: 'center' });
+      // Add subtle divider line
+      doc.setDrawColor(147, 197, 253); // #93C5FD
+      doc.setLineWidth(0.5);
+      doc.line(20, pageHeight - 25, pageWidth - 20, pageHeight - 25);
+    };
+
+    // Setting up document properties
     doc.setFont('Inter', 'normal');
     doc.setFontSize(16);
     doc.setTextColor(30, 64, 175); // Blue #1E3A8A
     doc.text('Harcourts Success Performance Comparison', 20, 20);
 
     // Harcourts Success Summary
+    doc.setFontSize(14);
+    doc.text('Harcourts Success Summary', 20, 30);
     doc.autoTable({
       head: [['Metric', 'Value']],
       body: [
@@ -596,15 +633,22 @@ export function ComparisonReport() {
         ['Agents', comparisonMetrics.harcourtsSuccess.agents.join(', ')],
         ['Top Agent', `${comparisonMetrics.harcourtsSuccess.topAgent.name} (${comparisonMetrics.harcourtsSuccess.topAgent.sales} sales)`],
         ['Most Active Street', `${comparisonMetrics.streetComparison.street} (${comparisonMetrics.streetComparison.listedCount} listed, ${comparisonMetrics.streetComparison.soldCount} sold)`],
-      ]
-    }, {
-      startY: 30,
+      ],
+      startY: 35,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
       bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+      margin: { left: 20, right: 20 },
     });
 
+    // Add section divider
+    doc.setDrawColor(59, 130, 246); // #3B82F6
+    doc.setLineWidth(1);
+    doc.line(20, doc.lastAutoTable.finalY + 5, pageWidth - 20, doc.lastAutoTable.finalY + 5);
+
     // Agency Comparison
+    doc.setFontSize(14);
+    doc.text('Agency Comparison', 20, doc.lastAutoTable.finalY + 15);
     doc.autoTable({
       head: [['Rank', 'Agency', 'Agents', 'Properties Listed', 'Properties Sold']],
       body: comparisonMetrics.agencyComparison.map((item, index) => [
@@ -613,15 +657,25 @@ export function ComparisonReport() {
         item.agents.join(', '),
         item.listedCount.toString(),
         item.soldCount.toString(),
-      ])
-    }, {
-      startY: doc.lastAutoTable.finalY + 10,
+      ]),
+      startY: doc.lastAutoTable.finalY + 20,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
       bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+      margin: { left: 20, right: 20 },
+      didDrawPage: () => {
+        addFooter(doc.internal.getCurrentPageInfo().pageNumber);
+      },
     });
 
+    // Add section divider
+    doc.setDrawColor(59, 130, 246);
+    doc.setLineWidth(1);
+    doc.line(20, doc.lastAutoTable.finalY + 5, pageWidth - 20, doc.lastAutoTable.finalY + 5);
+
     // Agent Comparison
+    doc.setFontSize(14);
+    doc.text('Agent Comparison', 20, doc.lastAutoTable.finalY + 15);
     doc.autoTable({
       head: [['Rank', 'Agent', 'Agency', 'Listings', 'Sales', 'Our Agent']],
       body: comparisonMetrics.agentComparison.map((item, index) => [
@@ -631,15 +685,25 @@ export function ComparisonReport() {
         item.listings.toString(),
         item.sales.toString(),
         item.agent === ourAgentName && item.agency === ourAgencyName ? 'Yes' : 'No',
-      ])
-    }, {
-      startY: doc.lastAutoTable.finalY + 10,
+      ]),
+      startY: doc.lastAutoTable.finalY + 20,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
       bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+      margin: { left: 20, right: 20 },
+      didDrawPage: () => {
+        addFooter(doc.internal.getCurrentPageInfo().pageNumber);
+      },
     });
 
+    // Add section divider
+    doc.setDrawColor(59, 130, 246);
+    doc.setLineWidth(1);
+    doc.line(20, doc.lastAutoTable.finalY + 5, pageWidth - 20, doc.lastAutoTable.finalY + 5);
+
     // Suburb Comparison
+    doc.setFontSize(14);
+    doc.text('Suburb Comparison', 20, doc.lastAutoTable.finalY + 15);
     doc.autoTable({
       head: [['Rank', 'Suburb', 'Top Agency', 'Top Listings', 'Harcourts Listings']],
       body: comparisonMetrics.suburbComparison.map((item, index) => [
@@ -648,15 +712,42 @@ export function ComparisonReport() {
         item.topAgency,
         item.topListings.toString(),
         item.harcourtsListings.toString(),
-      ])
-    }, {
-      startY: doc.lastAutoTable.finalY + 10,
+      ]),
+      startY: doc.lastAutoTable.finalY + 20,
       theme: 'striped',
       headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], font: 'Inter' },
       bodyStyles: { fillColor: [191, 219, 254], textColor: [30, 64, 175], font: 'Inter' },
+      margin: { left: 20, right: 20 },
+      didDrawPage: () => {
+        addFooter(doc.internal.getCurrentPageInfo().pageNumber);
+      },
     });
 
-    doc.save('Harcourts_Success_Comparison.pdf');
+    // Ensure footer is added to all pages
+    for (let i = 1; i <= totalPages; i++) {
+      addFooter(i);
+    }
+
+    return doc;
+  };
+
+  // Export to PDF
+  const exportToPDF = () => {
+    const doc = generatePDF();
+    if (doc) {
+      doc.save('Harcourts_Success_Comparison.pdf');
+    }
+  };
+
+  // Preview PDF
+  const previewPDF = () => {
+    const doc = generatePDF();
+    if (doc) {
+      const pdfUrl = doc.output('datauristring');
+      setPdfPreviewUrl(pdfUrl);
+      setIsPreviewOpen(true);
+      if (DEBUG) console.log('previewPDF: Generated PDF URL for preview');
+    }
   };
 
   // Export to CSV
@@ -708,8 +799,10 @@ export function ComparisonReport() {
       comparisonMetrics: comparisonMetrics ? 'Computed' : 'Not computed',
       currentPage,
       totalPages,
+      visiblePages,
       ourAgentName,
       ourAgencyName,
+      isPreviewOpen,
     });
   }
 
@@ -752,6 +845,44 @@ export function ComparisonReport() {
           </div>
         ) : (
           <div className="max-w-7xl mx-auto">
+            {/* PDF Preview Modal */}
+            <AnimatePresence>
+              {isPreviewOpen && pdfPreviewUrl && (
+                <motion.div
+                  className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <motion.div
+                    className="bg-[#FFFFFF] rounded-lg shadow-xl w-full max-w-4xl h-[80vh] relative"
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.8, opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <button
+                      onClick={() => {
+                        setIsPreviewOpen(false);
+                        setPdfPreviewUrl(null);
+                        if (DEBUG) console.log('Preview modal closed');
+                      }}
+                      className="absolute top-4 right-4 p-2 rounded-full bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                      aria-label="Close preview"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                    <iframe
+                      src={pdfPreviewUrl}
+                      className="w-full h-full rounded-lg"
+                      title="PDF Preview"
+                    />
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="flex justify-between items-center mb-8">
               <h1 className="text-3xl font-semibold text-[#1E3A8A]">Harcourts Success Comparison Report</h1>
               <div className="flex items-center space-x-4">
@@ -783,7 +914,7 @@ export function ComparisonReport() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                         <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
                           <p className="text-sm text-[#1E3A8A]">Total Listings</p>
-                          <p className="text-2xl font-semibold text-[#1E3A8A]">{comparisonMetrics.harcourtsSuccess.totalListings}</p>
+                          <p className="text-2xl font-semibold text-[# injurious[#1E3A8A]">{comparisonMetrics.harcourtsSuccess.totalListings}</p>
                         </div>
                         <div className="p-4 bg-[#FFFFFF] border border-[#E5E7EB] rounded-md">
                           <p className="text-sm text-[#1E3A8A]">Total Sold</p>
@@ -858,34 +989,45 @@ export function ComparisonReport() {
                         </motion.div>
                       </AnimatePresence>
                       <div className="flex justify-between items-center mt-4">
-                        <button
+                        <motion.button
                           onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                           disabled={currentPage === 1}
-                          className="p-2 rounded-md bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] disabled:bg-[#E5E7EB] disabled:text-[#6B7280] transition-colors"
+                          className="p-2 rounded-full bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] disabled:bg-[#E5E7EB] disabled:text-[#6B7280] transition-colors"
                           aria-label="Previous page"
+                          whileHover={{ scale: 1.1, boxShadow: '0 0 8px rgba(59, 130, 246, 0.5)' }}
+                          whileTap={{ scale: 0.95 }}
                         >
                           <ChevronLeft className="w-5 h-5" />
-                        </button>
+                        </motion.button>
                         <div className="flex space-x-2">
-                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                            <button
+                          {visiblePages.map((page) => (
+                            <motion.button
                               key={page}
-                              className={`w-3 h-3 rounded-full ${
-                                currentPage === page ? 'bg-[#1E3A8A]' : 'bg-[#BFDBFE]'
-                              } hover:bg-[#3B82F6] transition-colors`}
+                              className={`px-4 py-2 rounded-md text-sm font-semibold ${
+                                currentPage === page
+                                  ? 'bg-[#1E3A8A] text-white scale-110'
+                                  : 'bg-[#BFDBFE] text-[#1E3A8A] hover:bg-[#3B82F6] hover:text-white'
+                              } transition-colors shadow-md`}
                               onClick={() => setCurrentPage(page)}
                               aria-label={`Page ${page}`}
-                            />
+                              aria-current={currentPage === page ? 'page' : undefined}
+                              whileHover={{ scale: 1.1, boxShadow: '0 0 8px rgba(59, 130, 246, 0.5)' }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              {page}
+                            </motion.button>
                           ))}
                         </div>
-                        <button
+                        <motion.button
                           onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
                           disabled={currentPage === totalPages}
-                          className="p-2 rounded-md bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] disabled:bg-[#E5E7EB] disabled:text-[#6B7280] transition-colors"
+                          className="p-2 rounded-full bg-[#3B82F6] text-white hover:bg-[#BFDBFE] hover:text-[#1E3A8A] disabled:bg-[#E5E7EB] disabled:text-[#6B7280] transition-colors"
                           aria-label="Next page"
+                          whileHover={{ scale: 1.1, boxShadow: '0 0 8px rgba(59, 130, 246, 0.5)' }}
+                          whileTap={{ scale: 0.95 }}
                         >
                           <ChevronRight className="w-5 h-5" />
-                        </button>
+                        </motion.button>
                       </div>
                     </div>
                     <div className="mt-6 bg-[#FFFFFF] p-4 rounded-md border border-[#E5E7EB]">
@@ -1031,6 +1173,13 @@ export function ComparisonReport() {
 
                   {/* Export Buttons */}
                   <div className="flex space-x-4">
+                    <button
+                      onClick={previewPDF}
+                      className="px-4 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"
+                      aria-label="Preview PDF"
+                    >
+                      Preview PDF
+                    </button>
                     <button
                       onClick={exportToPDF}
                       className="px-4 py-2 bg-[#3B82F6] text-white rounded-md hover:bg-[#BFDBFE] hover:text-[#1E3A8A] transition-colors"

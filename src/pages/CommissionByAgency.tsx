@@ -1,3 +1,4 @@
+
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import {
@@ -10,6 +11,7 @@ import {
   ArcElement,
   ChartOptions,
 } from 'chart.js';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { PropertyDetails } from './Reports';
@@ -32,8 +34,8 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { useNavigate } from 'react-router-dom';
 
-// Register ChartJS components
-ChartJS.register(BarElement, CategoryScale, LinearScale, ArcElement, Tooltip, Legend);
+// Register ChartJS components and plugins
+ChartJS.register(BarElement, CategoryScale, LinearScale, ArcElement, Tooltip, Legend, ChartDataLabels);
 
 // Interfaces
 interface User {
@@ -46,9 +48,16 @@ interface User {
 
 interface CommissionSummary {
   totalCommission: number;
+  totalListedCommission: number;
+  totalSoldCommission: number;
   totalProperties: number;
+  totalListed: number;
+  totalSold: number;
   topAgency: string;
-  topAgent: { name: string; commission: number };
+  topAgencyCommissionRate: number;
+  topAgencyTotalCommission: number;
+  topAgencyPropertyCount: number;
+  topAgent: { name: string; commission: number; propertyCount: number };
   agencyPropertyCounts: Record<string, number>;
   topStreet: { street: string; listedCount: number; commission: number };
 }
@@ -56,8 +65,9 @@ interface CommissionSummary {
 interface AgencyTotal {
   agency: string;
   totalCommission: number;
-  listedCommission: number; // Added for listed properties commission
-  soldCommission: number; // Added for sold properties commission
+  listedCommission: number;
+  soldCommission: number;
+  commissionRate: number;
   propertyCount: number;
   listedCount: number;
   soldCount: number;
@@ -109,8 +119,9 @@ const calculateCommission = (
 
 const normalizeAgencyName = (agency: string | undefined | null): string => {
   if (!agency) return 'Unknown';
-  const trimmed = agency.trim();
-  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  const trimmed = agency.trim().toLowerCase();
+  if (trimmed.includes('harcourts success')) return 'Harcourts Success';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 };
 
 const normalizeAgentName = (agent: string | undefined | null): string => {
@@ -125,16 +136,16 @@ const normalizeSuburbName = (suburb: string | undefined | null): string => {
     pullenvale: 'PULLENVALE 4069',
     'pullenvale qld': 'PULLENVALE 4069',
     'pullenvale qld (4069)': 'PULLENVALE 4069',
-    'brookfield': 'BROOKFIELD 4069',
+    brookfield: 'BROOKFIELD 4069',
     'brookfield qld': 'BROOKFIELD 4069',
     'brookfield qld (4069)': 'BROOKFIELD 4069',
-     'anstead': 'ANSTEAD 4070',
+    anstead: 'ANSTEAD 4070',
     'anstead qld': 'ANSTEAD 4070',
     'anstead qld (4070)': 'ANSTEAD 4070',
     'chapel hill': 'CHAPEL HILL 4069',
     'chapel hill qld': 'CHAPEL HILL 4069',
     'chapell hill qld (4069)': 'CHAPEL HILL 4069',
-    'kenmore': 'KENMORE 4069',
+    kenmore: 'KENMORE 4069',
     'kenmore qld': 'KENMORE 4069',
     'kenmore qld (4069)': 'KENMORE 4069',
     'kenmore hills': 'KENMORE HILLS 4069',
@@ -146,13 +157,13 @@ const normalizeSuburbName = (suburb: string | undefined | null): string => {
     'pinjarra hills': 'PINJARRA HILLS 4069',
     'pinjarra hills qld': 'PINJARRA HILLS 4069',
     'pinjarra hills qld (4069)': 'PINJARRA HILLS 4069',
-    'moggill': 'MOGGILL 4070',
+    moggill: 'MOGGILL 4070',
     'moggill qld': 'MOGGILL 4070',
     'moggill qld (4070)': 'MOGGILL 4070',
-    'bellbowrie': 'BELLBOWRIE 4070',
+    bellbowrie: 'BELLBOWRIE 4070',
     'bellbowrie qld': 'BELLBOWRIE 4070',
     'bellbowrie qld (4070)': 'BELLBOWRIE 4070',
-    'springfield': 'SPRINGFIELD QLD 4300',
+    springfield: 'SPRINGFIELD QLD 4300',
     'springfield qld': 'SPRINGFIELD QLD 4300',
     'springfield qld (4300)': 'SPRINGFIELD QLD 4300',
     'spring mountain': 'SPRING MOUNTAIN QLD 4300',
@@ -253,8 +264,8 @@ function CommissionByAgency() {
   const [isUpdatingAgentCommission, setIsUpdatingAgentCommission] = useState(false);
   const itemsPerPage = 10;
   const ourAgencyName = 'Harcourts Success';
+  const ourAgentName = 'John Smith'; // Example agent name
   const { user } = useAuthStore((state: { user: User | null }) => ({ user: state.user }));
-  const ourAgentName = user?.agent_name || 'Unknown';
   const isAdmin = user?.role === 'admin';
   const navigate = useNavigate();
 
@@ -293,7 +304,7 @@ function CommissionByAgency() {
           const { commissionEarned, commissionRate } = calculateCommission(property, fetchedAgentCommissions);
           const isSold = property.contract_status === 'sold' || !!property.sold_date;
 
-          if (agency && commissionEarned > 0) {
+          if (agency && !isNaN(commissionEarned)) {
             newCommissionMap[agency] = newCommissionMap[agency] || {};
             newCommissionMap[agency][propertyType] = (newCommissionMap[agency][propertyType] || 0) + commissionEarned;
           }
@@ -302,7 +313,7 @@ function CommissionByAgency() {
             newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
             newAgentMap[agent].listed += 1;
             newAgentMap[agent].sold += isSold ? 1 : 0;
-            newAgentMap[agent].commission += commissionEarned;
+            newAgentMap[agent].commission += isNaN(commissionEarned) ? 0 : commissionEarned;
             if (!newAgentMap[agent].commissionRate) {
               const agentPropertyCommission = fetchedAgentCommissions.find(
                 (ac) => ac.property_id === property.id && ac.agent_name === agent
@@ -369,7 +380,7 @@ function CommissionByAgency() {
         const { commissionEarned, commissionRate } = calculateCommission(property, fetchedAgentCommissions);
         const isSold = property.contract_status === 'sold' || !!property.sold_date;
 
-        if (agency && commissionEarned > 0) {
+        if (agency && !isNaN(commissionEarned)) {
           newCommissionMap[agency] = newCommissionMap[agency] || {};
           newCommissionMap[agency][propertyType] = (newCommissionMap[agency][propertyType] || 0) + commissionEarned;
         }
@@ -378,7 +389,7 @@ function CommissionByAgency() {
           newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
           newAgentMap[agent].listed += 1;
           newAgentMap[agent].sold += isSold ? 1 : 0;
-          newAgentMap[agent].commission += commissionEarned;
+          newAgentMap[agent].commission += isNaN(commissionEarned) ? 0 : commissionEarned;
           if (!newAgentMap[agent].commissionRate) {
             const agentPropertyCommission = fetchedAgentCommissions.find(
               (ac) => ac.property_id === property.id && ac.agent_name === agent
@@ -466,7 +477,7 @@ function CommissionByAgency() {
         const { commissionEarned, commissionRate } = calculateCommission(property, fetchedAgentCommissions);
         const isSold = property.contract_status === 'sold' || !!property.sold_date;
 
-        if (agency && commissionEarned > 0) {
+        if (agency && !isNaN(commissionEarned)) {
           newCommissionMap[agency] = newCommissionMap[agency] || {};
           newCommissionMap[agency][propertyType] = (newCommissionMap[agency][propertyType] || 0) + commissionEarned;
         }
@@ -475,7 +486,7 @@ function CommissionByAgency() {
           newAgentMap[agent] = newAgentMap[agent] || { commission: 0, listed: 0, sold: 0, commissionRate: undefined };
           newAgentMap[agent].listed += 1;
           newAgentMap[agent].sold += isSold ? 1 : 0;
-          newAgentMap[agent].commission += commissionEarned;
+          newAgentMap[agent].commission += isNaN(commissionEarned) ? 0 : commissionEarned;
           if (!newAgentMap[agent].commissionRate) {
             const agentPropertyCommission = fetchedAgentCommissions.find(
               (ac) => ac.property_id === property.id && ac.agent_name === agent
@@ -499,57 +510,119 @@ function CommissionByAgency() {
 
   const calculateSummary = useCallback((): CommissionSummary => {
     let totalCommission = 0;
+    let totalListedCommission = 0;
+    let totalSoldCommission = 0;
     let totalProperties = 0;
+    let totalListed = 0;
+    let totalSold = 0;
     let topAgency = 'Unknown';
+    let topAgencyCommissionRate = 0;
+    let topAgencyTotalCommission = 0;
+    let topAgencyPropertyCount = 0;
     let maxCommission = 0;
+    let topAgent = { name: 'Unknown', commission: 0, propertyCount: 0 };
     const agencyPropertyCounts: Record<string, number> = {};
-    let topAgent = { name: 'Unknown', commission: 0 ,propertyCount: 0};
     const streetMap: Record<string, { listedCount: number; commission: number }> = {};
 
     if (!internalCommissionData || !internalProperties) {
-      return { totalCommission, totalProperties, topAgency,topAgencyPropertyCount:0, topAgent, agencyPropertyCounts, topStreet: { street: 'None', listedCount: 0, commission: 0 } };
+      console.warn('Missing commission data or properties:', { internalCommissionData, internalProperties });
+      return {
+        totalCommission,
+        totalListedCommission,
+        totalSoldCommission,
+        totalProperties,
+        totalListed,
+        totalSold,
+        topAgency,
+        topAgencyCommissionRate,
+        topAgencyTotalCommission,
+        topAgencyPropertyCount,
+        topAgent,
+        agencyPropertyCounts,
+        topStreet: { street: 'None', listedCount: 0, commission: 0 }
+      };
     }
 
+    // Initialize agency property counts
     Object.keys(internalCommissionData).forEach((agency) => {
       agencyPropertyCounts[agency] = 0;
     });
 
+    // Calculate commissions and property counts
     internalProperties.forEach((property) => {
       const agency = normalizeAgencyName(property.agency_name);
       const agent = normalizeAgentName(property.agent_name);
-      const { commissionEarned } = calculateCommission(property, agentCommissions);
-      const street = `${property.street_name}, ${normalizeSuburbName(property.suburb)}`;
+      const { commissionEarned, commissionRate } = calculateCommission(property, agentCommissions);
+      const street = `${property.street_name || 'Unknown'}, ${normalizeSuburbName(property.suburb)}`;
+      const isSold = property.contract_status === 'sold' || !!property.sold_date;
 
-      if (agency && internalCommissionData.hasOwnProperty(agency)) {
-        agencyPropertyCounts[agency] += 1;
+      if (agency && !isNaN(commissionEarned)) {
+        agencyPropertyCounts[agency] = (agencyPropertyCounts[agency] || 0) + 1;
         totalProperties += 1;
+        totalListed += 1;
+        totalListedCommission += commissionEarned;
+        if (isSold) {
+          totalSold += 1;
+          totalSoldCommission += commissionEarned;
+        }
         if (commissionEarned > 0) {
           totalCommission += commissionEarned;
           if (internalAgentData[agent]?.commission > topAgent.commission) {
-            topAgent = { name: agent, commission: internalAgentData[agent].commission ,propertyCount: internalAgentData[agent].listed};
+            topAgent = { name: agent, commission: internalAgentData[agent].commission, propertyCount: internalAgentData[agent].listed };
           }
         }
       }
 
       streetMap[street] = streetMap[street] || { listedCount: 0, commission: 0 };
       streetMap[street].listedCount += 1;
-      streetMap[street].commission += commissionEarned;
+      streetMap[street].commission += isNaN(commissionEarned) ? 0 : commissionEarned;
     });
 
+    // Calculate top agency
     Object.entries(internalCommissionData).forEach(([agency, types]) => {
-      const agencyTotal = Object.values(types).reduce((sum, val) => sum + val, 0);
-      if (agencyTotal > maxCommission) {
+      const agencyTotal = Object.values(types).reduce((sum, val) => sum + (isNaN(val) ? 0 : val), 0);
+      const agencyProperties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === agency);
+      const propertyCount = agencyProperties.length;
+      const validCommissions = agencyProperties
+        .map((p) => p.commission)
+        .filter((c): c is number => c !== undefined && c !== null && !isNaN(c));
+      const commissionRate = validCommissions.length > 0 
+        ? validCommissions.reduce((sum, c) => sum + c, 0) / validCommissions.length 
+        : 0;
+
+      if (agencyTotal > maxCommission && !isNaN(agencyTotal) && agencyTotal > 0) {
         maxCommission = agencyTotal;
         topAgency = agency;
+        topAgencyTotalCommission = agencyTotal;
+        topAgencyPropertyCount = propertyCount;
+        topAgencyCommissionRate = commissionRate;
       }
     });
 
     const topStreet = Object.entries(streetMap).reduce(
-      (max, [street, data]) => data.listedCount > max.listedCount || (data.listedCount === max.listedCount && data.commission > max.commission) ? { street, ...data } : max,
+      (max, [street, data]) => 
+        data.listedCount > max.listedCount || 
+        (data.listedCount === max.listedCount && data.commission > max.commission) 
+          ? { street, ...data } 
+          : max,
       { street: 'None', listedCount: 0, commission: 0 }
     );
 
-    return { totalCommission, totalProperties, topAgency,topAgencyPropertyCount: agencyPropertyCounts[topAgency] || 0, topAgent, agencyPropertyCounts, topStreet };
+    return {
+      totalCommission,
+      totalListedCommission,
+      totalSoldCommission,
+      totalProperties,
+      totalListed,
+      totalSold,
+      topAgency,
+      topAgencyCommissionRate,
+      topAgencyTotalCommission,
+      topAgencyPropertyCount,
+      topAgent,
+      agencyPropertyCounts,
+      topStreet
+    };
   }, [internalCommissionData, internalProperties, internalAgentData, agentCommissions]);
 
   const summary = calculateSummary();
@@ -589,21 +662,28 @@ function CommissionByAgency() {
         const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === agency);
         const listedCommission = properties.reduce((sum, p) => {
           const { commissionEarned } = calculateCommission(p, agentCommissions);
-          return sum + commissionEarned;
+          return sum + (isNaN(commissionEarned) ? 0 : commissionEarned);
         }, 0);
         const soldCommission = properties
           .filter((p) => p.contract_status === 'sold' || !!p.sold_date)
           .reduce((sum, p) => {
             const { commissionEarned } = calculateCommission(p, agentCommissions);
-            return sum + commissionEarned;
+            return sum + (isNaN(commissionEarned) ? 0 : commissionEarned);
           }, 0);
+        const validCommissions = properties
+          .map((p) => p.commission)
+          .filter((c): c is number => c !== undefined && c !== null && !isNaN(c));
+        const commissionRate = validCommissions.length > 0 
+          ? validCommissions.reduce((sum, c) => sum + c, 0) / validCommissions.length 
+          : 0;
 
         return {
           agency,
-          totalCommission: Object.values(types).reduce((sum, val) => sum + val, 0),
+          totalCommission: Object.values(types).reduce((sum, val) => sum + (isNaN(val) ? 0 : val), 0),
           listedCommission,
           soldCommission,
-          propertyCount: summary.agencyPropertyCounts[agency] || 0,
+          commissionRate,
+          propertyCount: properties.length,
           listedCount: properties.length,
           soldCount: properties.filter((p) => p.contract_status === 'sold' || !!p.sold_date).length,
           suburbs: Array.from(agencySuburbsMap[agency] || []),
@@ -611,9 +691,17 @@ function CommissionByAgency() {
         };
       })
       .sort((a, b) => b.totalCommission - a.totalCommission);
-  }, [internalCommissionData, internalProperties, summary.agencyPropertyCounts, internalAgentData, agentCommissions]);
+  }, [internalCommissionData, internalProperties, internalAgentData, agentCommissions]);
 
-  const ourAgency = useMemo(() => agencyTotals.find((a) => a.agency === ourAgencyName), [agencyTotals, ourAgencyName]);
+  const ourAgency = useMemo(() => {
+    const agency = agencyTotals.find((a) => a.agency.toLowerCase() === ourAgencyName.toLowerCase());
+    if (!agency) {
+      console.warn(`No data found for agency: ${ourAgencyName}`);
+      return null;
+    }
+    return agency;
+  }, [agencyTotals, ourAgencyName]);
+
   const ourAgent = useMemo(() => {
     if (!ourAgency) return null;
     return ourAgency.agents.find((a) => a.name === ourAgentName) || null;
@@ -647,7 +735,17 @@ function CommissionByAgency() {
       datasets: propertyTypes.map((type, index) => ({
         label: type,
         data: topFiveAgencies.map((agency) => internalCommissionData?.[agency]?.[type] || 0),
-        backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'][index % 5],
+        backgroundColor: (context: any) => {
+          const ctx = context.chart.ctx;
+          const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+          const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
+          gradient.addColorStop(0, colors[index % 5]);
+          gradient.addColorStop(1, colors[index % 5] + '80');
+          return gradient;
+        },
+        borderColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'][index % 5],
+        borderWidth: 2,
+        hoverBackgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'][index % 5],
         stack: 'Stack 0',
       })),
     }),
@@ -659,6 +757,9 @@ function CommissionByAgency() {
       legend: { position: 'top', labels: { font: { size: 14, family: 'Inter' } } },
       title: { display: true, text: 'Top 5 Agencies by Commission', font: { size: 18, weight: 'bold', family: 'Inter' } },
       tooltip: {
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        titleFont: { size: 14, family: 'Inter' },
+        bodyFont: { size: 12, family: 'Inter' },
         callbacks: {
           label: (context) => {
             const value = context.parsed.y;
@@ -672,13 +773,32 @@ function CommissionByAgency() {
               (sum, dataset) => sum + (dataset.data[tooltipItems[0].dataIndex] || 0),
               0
             );
-            return `Total: ${formatCurrency(total)}\nProperties: ${summary.agencyPropertyCounts[agency] || 0}`;
+            const properties = agencyTotals.find(a => a.agency === agency)?.propertyCount || 0;
+            const commissionRate = agencyTotals.find(a => a.agency === agency)?.commissionRate || 0;
+            return [
+              `Total: ${formatCurrency(total)}`,
+              `Properties: ${properties}`,
+              `Avg. Commission Rate: ${commissionRate.toFixed(2)}%`
+            ];
           },
         },
       },
+      datalabels: {
+        display: (context) => context.dataset.data[context.dataIndex] > 0,
+        formatter: (value: number) => formatCurrency(value),
+        color: '#fff',
+        font: { size: 10, family: 'Inter', weight: 'bold' },
+        anchor: 'end',
+        align: 'top',
+        offset: 5,
+      },
     },
     scales: {
-      x: { stacked: true, ticks: { font: { size: 12, family: 'Inter' } } },
+      x: {
+        stacked: true,
+        ticks: { font: { size: 12, family: 'Inter' } },
+        grid: { display: false },
+      },
       y: {
         stacked: true,
         beginAtZero: true,
@@ -687,8 +807,15 @@ function CommissionByAgency() {
           font: { size: 12, family: 'Inter' },
         },
         title: { display: true, text: 'Commission (AUD)', font: { size: 14, family: 'Inter' } },
+        grid: { color: 'rgba(0, 0, 0, 0.1)' },
       },
     },
+    animation: {
+      duration: 1500,
+      easing: 'easeOutQuart',
+    },
+    maintainAspectRatio: false,
+    responsive: true,
   };
 
   const agentChartData = useMemo(
@@ -742,11 +869,15 @@ function CommissionByAgency() {
       head: [['Metric', 'Value']],
       body: [
         ['Total Commission', formatCurrency(summary.totalCommission)],
+        ['Listed Commission', formatCurrency(summary.totalListedCommission)],
+        ['Sold Commission', formatCurrency(summary.totalSoldCommission)],
         ['Total Properties', summary.totalProperties.toString()],
-        ['Top Agency', summary.topAgency],
+        ['Properties Listed', summary.totalListed.toString()],
+        ['Properties Sold', summary.totalSold.toString()],
+        ['Top Agency', `${summary.topAgency} (${formatCurrency(summary.topAgencyTotalCommission)}, ${summary.topAgencyCommissionRate.toFixed(2)}%, ${summary.topAgencyPropertyCount} properties)`],
         ['Top Agent', `${summary.topAgent.name} (${formatCurrency(summary.topAgent.commission)})`],
         ['Most Active Street', `${summary.topStreet.street} (${summary.topStreet.listedCount} listed, ${formatCurrency(summary.topStreet.commission)})`],
-        ['Our Agency', `${ourAgencyName} (${formatCurrency(ourAgency?.totalCommission || 0)}, ${ourAgency?.propertyCount || 0} properties)`],
+        ['Our Agency', `${ourAgencyName} (${formatCurrency(ourAgency?.totalCommission || 0)}, ${ourAgency?.commissionRate.toFixed(2) || 0}%, ${ourAgency?.propertyCount || 0} properties)`],
         ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission || 0)})` : 'N/A'],
       ],
       startY: 50,
@@ -757,21 +888,17 @@ function CommissionByAgency() {
 
     doc.autoTable({
       head: [['Agency', 'Commission Rate', 'Total Commission', 'Listed Commission', 'Sold Commission', 'Total Properties', 'Listed', 'Sold', 'Suburbs']],
-      body: agencyTotals.map((row) => {
-        const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
-        const commissionRate = properties.length > 0 ? properties[0].commission || 0 : 0;
-        return [
-          row.agency,
-          `${commissionRate}%`,
-          formatCurrency(row.totalCommission),
-          formatCurrency(row.listedCommission),
-          formatCurrency(row.soldCommission),
-          row.propertyCount.toString(),
-          row.listedCount.toString(),
-          row.soldCount.toString(),
-          row.suburbs.join(', ') || 'None',
-        ];
-      }),
+      body: agencyTotals.map((row) => [
+        row.agency,
+        `${row.commissionRate.toFixed(2)}%`,
+        formatCurrency(row.totalCommission),
+        formatCurrency(row.listedCommission),
+        formatCurrency(row.soldCommission),
+        row.propertyCount.toString(),
+        row.listedCount.toString(),
+        row.soldCount.toString(),
+        row.suburbs.join(', ') || 'None',
+      ]),
       startY: doc.lastAutoTable.finalY + 20,
       theme: 'striped',
       headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], font: 'Inter' },
@@ -782,7 +909,7 @@ function CommissionByAgency() {
       head: [['Agent', 'Commission Rate', 'Total Commission', 'Properties Listed', 'Properties Sold', 'Our Agent']],
       body: Object.entries(internalAgentData).map(([name, data]) => [
         name,
-        data.commissionRate ? `${data.commissionRate}%` : 'Agency Default',
+        data.commissionRate ? `${data.commissionRate.toFixed(2)}%` : 'Agency Default',
         formatCurrency(data.commission),
         data.listed.toString(),
         data.sold.toString(),
@@ -807,36 +934,36 @@ function CommissionByAgency() {
       ['Summary'],
       ['Metric', 'Value'],
       ['Total Commission', formatCurrency(summary.totalCommission)],
+      ['Listed Commission', formatCurrency(summary.totalListedCommission)],
+      ['Sold Commission', formatCurrency(summary.totalSoldCommission)],
       ['Total Properties', summary.totalProperties.toString()],
-      ['Top Agency', summary.topAgency],
+      ['Properties Listed', summary.totalListed.toString()],
+      ['Properties Sold', summary.totalSold.toString()],
+      ['Top Agency', `${summary.topAgency} (${formatCurrency(summary.topAgencyTotalCommission)}, ${summary.topAgencyCommissionRate.toFixed(2)}%, ${summary.topAgencyPropertyCount} properties)`],
       ['Top Agent', `${summary.topAgent.name} (${formatCurrency(summary.topAgent.commission)})`],
       ['Most Active Street', `${summary.topStreet.street} (${summary.topStreet.listedCount} listed, ${formatCurrency(summary.topStreet.commission)})`],
-      ['Our Agency', `${ourAgencyName} (${formatCurrency(ourAgency?.totalCommission || 0)}, ${ourAgency?.propertyCount || 0} properties)`],
+      ['Our Agency', `${ourAgencyName} (${formatCurrency(ourAgency?.totalCommission || 0)}, ${ourAgency?.commissionRate.toFixed(2) || 0}%, ${ourAgency?.propertyCount || 0} properties)`],
       ['Our Agent', ourAgent ? `${ourAgentName} (${formatCurrency(ourAgent.totalCommission || 0)})` : 'N/A'],
       [],
       ['Agency Totals'],
       ['Agency', 'Commission Rate', 'Total Commission', 'Listed Commission', 'Sold Commission', 'Total Properties', 'Listed', 'Sold', 'Suburbs'],
-      ...agencyTotals.map((row) => {
-        const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
-        const commissionRate = properties.length > 0 ? properties[0].commission || 0 : 0;
-        return [
-          row.agency,
-          `${commissionRate}%`,
-          formatCurrency(row.totalCommission),
-          formatCurrency(row.listedCommission),
-          formatCurrency(row.soldCommission),
-          row.propertyCount.toString(),
-          row.listedCount.toString(),
-          row.soldCount.toString(),
-          row.suburbs.join(', ') || 'None',
-        ];
-      }),
+      ...agencyTotals.map((row) => [
+        row.agency,
+        `${row.commissionRate.toFixed(2)}%`,
+        formatCurrency(row.totalCommission),
+        formatCurrency(row.listedCommission),
+        formatCurrency(row.soldCommission),
+        row.propertyCount.toString(),
+        row.listedCount.toString(),
+        row.soldCount.toString(),
+        row.suburbs.join(', ') || 'None',
+      ]),
       [],
       ['Agent Totals'],
       ['Agent', 'Commission Rate', 'Total Commission', 'Properties Listed', 'Properties Sold', 'Our Agent'],
       ...Object.entries(internalAgentData).map(([name, data]) => [
         name,
-        data.commissionRate ? `${data.commissionRate}%` : 'Agency Default',
+        data.commissionRate ? `${data.commissionRate.toFixed(2)}%` : 'Agency Default',
         formatCurrency(data.commission),
         data.listed.toString(),
         data.sold.toString(),
@@ -1038,26 +1165,42 @@ function CommissionByAgency() {
           isOpen={openSections.summary}
           toggleOpen={() => setOpenSections({ ...openSections, summary: !openSections.summary })}
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="p-4 bg-indigo-50 rounded-lg">
               <p className="text-sm text-gray-600">Total Commission</p>
               <p className="text-2xl font-semibold text-indigo-600">{formatCurrency(summary.totalCommission)}</p>
+            </div>
+            <div className="p-4 bg-indigo-50 rounded-lg">
+              <p className="text-sm text-gray-600">Listed Commission</p>
+              <p className="text-2xl font-semibold text-indigo-600">{formatCurrency(summary.totalListedCommission)}</p>
+            </div>
+            <div className="p-4 bg-indigo-50 rounded-lg">
+              <p className="text-sm text-gray-600">Sold Commission</p>
+              <p className="text-2xl font-semibold text-indigo-600">{formatCurrency(summary.totalSoldCommission)}</p>
             </div>
             <div className="p-4 bg-indigo-50 rounded-lg">
               <p className="text-sm text-gray-600">Total Properties</p>
               <p className="text-2xl font-semibold text-indigo-600">{summary.totalProperties}</p>
             </div>
             <div className="p-4 bg-indigo-50 rounded-lg">
+              <p className="text-sm text-gray-600">Properties Listed</p>
+              <p className="text-2xl font-semibold text-indigo-600">{summary.totalListed}</p>
+            </div>
+            <div className="p-4 bg-indigo-50 rounded-lg">
+              <p className="text-sm text-gray-600">Properties Sold</p>
+              <p className="text-2xl font-semibold text-indigo-600">{summary.totalSold}</p>
+            </div>
+            <div className="p-4 bg-indigo-50 rounded-lg">
               <p className="text-sm text-gray-600">Top Agency</p>
               <p className="text-lg font-semibold text-indigo-600 flex items-center">
-                {summary.topAgency} ({summary.topAgencyPropertyCount} properties)
+                {summary.topAgency} ({formatCurrency(summary.topAgencyTotalCommission)}),( {summary.topAgencyCommissionRate.toFixed(2)}%), ({summary.topAgencyPropertyCount} properties)
                 {summary.topAgency === ourAgencyName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
               </p>
             </div>
             <div className="p-4 bg-indigo-50 rounded-lg">
               <p className="text-sm text-gray-600">Top Agent</p>
               <p className="text-lg font-semibold text-indigo-600 flex items-center">
-                {summary.topAgent.name} ({formatCurrency(summary.topAgent.commission)})( {summary.topAgent.propertyCount} properties)
+                {summary.topAgent.name} ({formatCurrency(summary.topAgent.commission)}),( {summary.topAgent.propertyCount} properties)
                 {summary.topAgent.name === ourAgentName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
               </p>
             </div>
@@ -1072,41 +1215,105 @@ function CommissionByAgency() {
           {ourAgency ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-4 bg-indigo-50 rounded-lg">
+                <motion.div
+                  className="p-4 bg-indigo-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3 }}
+                >
                   <p className="text-sm text-gray-600">Total Commission</p>
                   <p className="text-2xl font-semibold text-indigo-600">{formatCurrency(ourAgency.totalCommission)}</p>
-                </div>
-                <div className="p-4 bg-indigo-50 rounded-lg">
+                </motion.div>
+                <motion.div
+                  className="p-4 bg-indigo-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: 0.1 }}
+                >
+                  <p className="text-sm text-gray-600">Listed Commission</p>
+                  <p className="text-2xl font-semibold text-indigo-600">{formatCurrency(ourAgency.listedCommission)}</p>
+                </motion.div>
+                <motion.div
+                  className="p-4 bg-indigo-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: 0.2 }}
+                >
+                  <p className="text-sm text-gray-600">Sold Commission</p>
+                  <p className="text-2xl font-semibold text-indigo-600">{formatCurrency(ourAgency.soldCommission)}</p>
+                </motion.div>
+                <motion.div
+                  className="p-4 bg-indigo-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: 0.3 }}
+                >
+                  <p className="text-sm text-gray-600">Commission Rate</p>
+                  <p className="text-2xl font-semibold text-indigo-600">{ourAgency.commissionRate.toFixed(2)}%</p>
+                </motion.div>
+                <motion.div
+                  className="p-4 bg-indigo-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: 0.4 }}
+                >
                   <p className="text-sm text-gray-600">Properties Listed</p>
                   <p className="text-2xl font-semibold text-indigo-600">{ourAgency.listedCount}</p>
-                </div>
-                <div className="p-4 bg-indigo-50 rounded-lg">
+                </motion.div>
+                <motion.div
+                  className="p-4 bg-indigo-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: 0.5 }}
+                >
                   <p className="text-sm text-gray-600">Properties Sold</p>
                   <p className="text-2xl font-semibold text-indigo-600">{ourAgency.soldCount}</p>
-                </div>
+                </motion.div>
               </div>
               {ourAgent && (
-                <div className="p-4 bg-yellow-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Our Agent: {ourAgentName}</p>
-                  <p className="text-lg font-semibold text-indigo-600">
-                    Commission: {formatCurrency(ourAgent.totalCommission)}, Listed: {ourAgent.propertiesListed}, Sold: {ourAgent.propertiesSold}
-                    {ourAgent.commissionRate ? `, Commission Rate: ${ourAgent.commissionRate}%` : ''}
+                <motion.div
+                  className="p-4 bg-yellow-50 rounded-lg shadow-sm"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <p className="text-sm text-gray-600">Agent Name</p>
+                  <p className="text-lg font-semibold text-indigo-600 flex items-center">
+                    {ourAgentName}
+                    <Star className="w-4 h-4 ml-2 text-yellow-400" />
                   </p>
-                </div>
+                  <p className="text-sm text-gray-600 mt-2">Performance</p>
+                  <p className="text-lg font-semibold text-indigo-600">
+                    Commission: {formatCurrency(ourAgent.totalCommission || 0)}, Listed: {ourAgent.propertiesListed}, Sold: {ourAgent.propertiesSold}
+                    {ourAgent.commissionRate ? `, Commission Rate: ${ourAgent.commissionRate.toFixed(2)}%` : ''}
+                  </p>
+                </motion.div>
               )}
+              <div className="p-4 bg-indigo-50 rounded-lg">
+                <p className="text-sm text-gray-600">Active Suburbs</p>
+                <p className="text-lg font-semibold text-indigo-600">{ourAgency.suburbs.join(', ') || 'None'}</p>
+              </div>
               <ProgressBar
                 value={ourAgency.totalCommission}
                 label="Commission vs. Top Agency"
-                maxValue={Math.max(...agencyTotals.map((a) => a.totalCommission))}
+                maxValue={Math.max(...agencyTotals.map((a) => a.totalCommission), 1)}
               />
               <ProgressBar
                 value={ourAgency.soldCount}
                 label="Sales vs. Top Agency"
-                maxValue={Math.max(...agencyTotals.map((a) => a.soldCount))}
+                maxValue={Math.max(...agencyTotals.map((a) => a.soldCount), 1)}
+              />
+              <ProgressBar
+                value={ourAgency.listedCount}
+                label="Listings vs. Top Agency"
+                maxValue={Math.max(...agencyTotals.map((a) => a.listedCount), 1)}
               />
             </div>
           ) : (
-            <p className="text-gray-600">No data available for Harcourts Success.</p>
+            <div className="p-4 bg-red-50 rounded-lg">
+              <p className="text-gray-600 font-semibold">No data available for Harcourts Success.</p>
+              <p className="text-sm text-gray-500">Please verify the data in the properties table or contact support.</p>
+            </div>
           )}
         </CollapsibleSection>
 
@@ -1115,10 +1322,14 @@ function CommissionByAgency() {
           isOpen={openSections.agencies}
           toggleOpen={() => setOpenSections({ ...openSections, agencies: !openSections.agencies })}
         >
-          <table className="min-w-full divide-y divide-gray-200">
+          <div className="relative h-[400px]">
+            <Bar data={agencyChartData} options={agencyChartOptions} />
+          </div>
+          <table className="min-w-full divide-y divide-gray-200 mt-6">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Commission Rate</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Commission</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Listed Commission</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sold Commission</th>
@@ -1147,6 +1358,7 @@ function CommissionByAgency() {
                       {row.agency}
                       {row.agency === ourAgencyName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{row.commissionRate.toFixed(2)}%</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.totalCommission)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.listedCommission)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(row.soldCommission)}</td>
@@ -1189,19 +1401,37 @@ function CommissionByAgency() {
                 <ChevronLeft className="w-4 h-4 mr-1" />
                 Previous
               </motion.button>
-              {Array.from({ length: filteredTotalPages }, (_, i) => i + 1).map((page) => (
-                <motion.button
-                  key={page}
-                  onClick={() => handlePageChange(page)}
-                  className={`px-3 py-1 rounded-full text-sm ${
-                    currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  {page}
-                </motion.button>
-              ))}
+              {filteredTotalPages <= 3 ? (
+                Array.from({ length: filteredTotalPages }, (_, i) => i + 1).map((page) => (
+                  <motion.button
+                    key={page}
+                    onClick={() => handlePageChange(page)}
+                    className={`px-3 py-1 rounded-full text-sm ${
+                      currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    {page}
+                  </motion.button>
+                ))
+              ) : (
+                <>
+                  {[1, 2, 3].map((page) => (
+                    <motion.button
+                      key={page}
+                      onClick={() => handlePageChange(page)}
+                      className={`px-3 py-1 rounded-full text-sm ${
+                        currentPage === page ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      {page}
+                    </motion.button>
+                  ))}
+                </>
+              )}
               <motion.button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === filteredTotalPages}
@@ -1218,9 +1448,6 @@ function CommissionByAgency() {
               </motion.button>
             </div>
           )}
-          <div className="mt-6">
-            <Bar data={agencyChartData} options={agencyChartOptions} />
-          </div>
         </CollapsibleSection>
 
         {selectedAgency && (
@@ -1268,7 +1495,7 @@ function CommissionByAgency() {
                         {agent.name === ourAgentName && selectedAgency === ourAgencyName && <Star className="w-4 h-4 ml-2 text-yellow-400" />}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {agent.commissionRate ? `${agent.commissionRate}%` : 'Agency Default'}
+                        {agent.commissionRate ? `${agent.commissionRate.toFixed(2)}%` : 'Agency Default'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(agent.commission)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{agent.listed}</td>
@@ -1276,12 +1503,13 @@ function CommissionByAgency() {
                       {isAdmin && (
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           <motion.button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setAgentCommissionEdit({
                                 isOpen: true,
                                 agency: selectedAgency,
                                 agent: agent.name,
-                                newCommission: agent.commissionRate?.toString() || '',
+                                newCommission: '',
                               });
                             }}
                             className="flex items-center px-3 py-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
@@ -1367,7 +1595,7 @@ function CommissionByAgency() {
                     id="commission"
                     value={commissionEdit.newCommission}
                     onChange={(e) => setCommissionEdit({ ...commissionEdit, newCommission: e.target.value })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                    className="mt-1 block w-full rounded-md border-gray--300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
                     placeholder="e.g., 2.5"
                     step="0.1"
                     min="0"

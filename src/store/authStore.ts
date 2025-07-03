@@ -26,7 +26,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   profile: null,
-  loading: false, // Start with loading: false
+  loading: false,
   authError: null,
   setUser: (user) => {
     console.log('Setting user:', user);
@@ -149,7 +149,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 }));
 
-// Subscribe to auth state changes
 supabase.auth.onAuthStateChange(async (event, session) => {
   console.log('Auth state changed:', event, session?.user?.id);
   const { user, loading } = useAuthStore.getState();

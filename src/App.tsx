@@ -7,6 +7,7 @@ import { PropertyForm } from './pages/PropertyForm';
 import { PropertyList } from './pages/PropertyList';
 import { PropertyDetail } from './pages/PropertyDetail';
 import { Navigation } from './components/Navigation';
+import { CreateAgentModal } from './components/CreateAgentModal';
 import { AgentLogin } from './pages/AgentLogin';
 import { AgentDashboard } from './pages/AgentDashboard';
 import { Reports } from './pages/Reports';
@@ -128,6 +129,8 @@ function App() {
             <Route path="/agent-dashboard/phone-calls" element={<AgentRoute><PhoneCalls /></AgentRoute>} />
             <Route path="/marketing-plan" element={<MarketingPlanPage />} />
             <Route path="/property-report-page" element={<PropertyReportPage />} />
+            <Route path="/create-agent-modal" element={<CreateAgentModal />} />
+            <Route path="/progress-report-page" element={<ProgressReportPage />} />
             <Route path="/activity-logger" element={<AgentRoute><ActivityLogger /></AgentRoute>} />
             <Route path="/reports" element={<AgentRoute><Reports /></AgentRoute>} />
             <Route path="/agent-properties" element={<PropertyList />} />

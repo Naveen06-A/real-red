@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { Mic, Search, Download, SlidersHorizontal, X, TrendingUp, BarChart2, PlusCircle, FileText, BarChart, Activity, CheckCircle, Home, Bath, Car, Eye } from 'lucide-react';
@@ -11,6 +12,7 @@ import { formatCurrency } from '../utils/formatters';
 import { toast } from 'react-toastify';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { Bar } from 'react-chartjs-2';
+import * as pdfjsLib from 'pdfjs-dist';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -20,6 +22,9 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
+
+// Set pdf.js worker source (host locally for production)
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -95,10 +100,82 @@ export function AgentDashboard() {
     categories: [],
   });
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
-  const [showDebug, setShowDebug] = useState(false);
+  const [showDebug, setShowDebug] = useState(true);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null);
+  const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Handle PDF rendering with pdf.js
+  useEffect(() => {
+    if (showPreviewModal && pdfDataUrl && pdfCanvasRef.current && !pdfDataUrl.startsWith('blob:')) {
+      const loadPdf = async () => {
+        try {
+          console.debug('Attempting to load PDF:', { dataUrlLength: pdfDataUrl.length });
+          const pdf = await pdfjsLib.getDocument(pdfDataUrl).promise;
+          console.debug('PDF loaded, page count:', pdf.numPages);
+          const page = await pdf.getPage(1);
+
+          // Get page dimensions to determine orientation
+          const [pageWidth, pageHeight] = page.getViewport({ scale: 1 }).viewBox.slice(2, 4);
+          const isLandscape = pageWidth > pageHeight;
+
+          // Calculate scale to fit modal with larger text
+          const canvas = pdfCanvasRef.current;
+          const modalWidth = window.innerWidth * 0.98; // Increased to 98vw
+          const modalHeight = window.innerHeight * 0.98 - 100; // 98vh minus header/footer
+          const scale = Math.min(modalWidth / pageWidth, modalHeight / pageHeight) * 2.5; // Increased for sharper text
+
+          const viewport = page.getViewport({ scale });
+          const context = canvas.getContext('2d');
+          if (!context) {
+            throw new Error('Failed to get canvas context');
+          }
+
+          // High-resolution rendering
+          canvas.height = viewport.height * window.devicePixelRatio;
+          canvas.width = viewport.width * window.devicePixelRatio;
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          context.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+          await page.render({ canvasContext: context, viewport }).promise;
+          console.debug('PDF page 1 rendered on canvas', {
+            orientation: isLandscape ? 'landscape' : 'portrait',
+            scale,
+            canvasWidth: canvas.width,
+            canvasHeight: canvas.height,
+            devicePixelRatio: window.devicePixelRatio,
+          });
+          toast.success('PDF preview loaded successfully!');
+        } catch (error: any) {
+          console.error('Error rendering PDF with pdf.js:', {
+            error: error.message,
+            stack: error.stack,
+            dataUrlLength: pdfDataUrl.length,
+            timestamp: new Date().toISOString(),
+          });
+          // Fallback to Blob URL in iframe
+          try {
+            const base64Part = pdfDataUrl.split(',')[1];
+            const binary = atob(base64Part);
+            const array = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              array[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob([array], { type: 'application/pdf' });
+            const blobUrl = URL.createObjectURL(blob);
+            setPdfDataUrl(blobUrl);
+            console.debug('Falling back to Blob URL for iframe:', blobUrl);
+          } catch (fallbackError) {
+            console.error('Error creating Blob URL:', fallbackError);
+            toast.error('Failed to render PDF preview. Try downloading or check console for details.');
+          }
+        }
+      };
+      loadPdf();
+    }
+  }, [showPreviewModal, pdfDataUrl]);
 
   const fetchAvailableCategories = useCallback(async () => {
     try {
@@ -128,12 +205,14 @@ export function AgentDashboard() {
         .select('*')
         .order('listed_date', { ascending: false });
       if (error) throw error;
+      console.debug('Fetched properties:', { count: data?.length || 0, sample: data?.slice(0, 2) });
+      setProperties(data || []);
+      if (!data || data.length === 0) {
+        setError('No properties found in the database.');
+        toast.warn('No properties found. Check database or filters.');
+      }
 
-      console.debug('Fetched properties:', data);
-      const fetchedProperties = data || [];
-      setProperties(fetchedProperties);
-
-      const predictionPromises = fetchedProperties.map(async (property) => {
+      const predictionPromises = (data || []).map(async (property) => {
         const prediction = await analyzePriceTrend(
           property.city || property.suburb || 'Unknown',
           property.property_type || 'Unknown'
@@ -233,20 +312,6 @@ export function AgentDashboard() {
         price: filters.price ? parseInt(filters.price, 10) : null,
       };
 
-      // Log unique suburb and category values in database for debugging
-      const { data: debugData, error: debugError } = await supabase
-        .from('properties')
-        .select('suburb, category');
-      if (debugError) {
-        console.error('Debug data fetch error:', debugError);
-      } else {
-        console.debug('Database values:', {
-          suburbs: [...new Set(debugData?.map(d => d.suburb?.trim()))],
-          categories: [...new Set(debugData?.map(d => d.category?.trim()))],
-        });
-      }
-
-      // Apply category filter with case-insensitive matching
       if (filters.categories.length > 0) {
         console.debug('Applying category filter:', filters.categories);
         queryBuilder = queryBuilder.or(
@@ -300,7 +365,7 @@ export function AgentDashboard() {
       const { data, error } = await queryBuilder.order('listed_date', { ascending: false });
       if (error) throw error;
 
-      console.debug('Query result:', { count: data?.length || 0, data });
+      console.debug('Query result:', { count: data?.length || 0, sample: data?.slice(0, 2) });
       setProperties(data || []);
 
       if (data?.length === 0) {
@@ -508,34 +573,51 @@ export function AgentDashboard() {
 
   const generateReport = async (action: 'save' | 'preview') => {
     setIsGeneratingPDF(true);
-    console.debug(`Starting PDF ${action}...`);
+    console.debug(`Starting PDF ${action} at ${new Date().toISOString()}...`);
     try {
-      // Prepare data for the PDF
+      console.debug('Properties for PDF:', properties.map(p => ({
+        id: p.id,
+        address: p.address,
+        street_number: p.street_number,
+        street_name: p.street_name,
+        suburb: p.suburb,
+        price: p.price,
+        category: p.category,
+      })));
+
       const headers = [['Address', 'Suburb', 'Price', 'Status']];
-      const tableData = properties.map((p, index) => {
-        try {
-          return [
-            `${p.street_number || ''} ${p.street_name || ''}`.trim() || p.address || 'N/A',
-            p.suburb || 'N/A',
-            p.price ? formatCurrency(p.price) : 'N/A',
-            p.category || 'N/A',
-          ];
-        } catch (e) {
-          console.error(`Error processing property at index ${index}:`, p, e);
-          return ['Error', 'Error', 'Error', 'Error'];
-        }
+      const tableData = properties.map((p) => {
+        const address = (p.address || `${p.street_number || ''} ${p.street_name || ''}`.trim() || 'N/A').toString();
+        const suburb = (p.suburb || 'N/A').toString();
+        const price = p.price != null && !isNaN(p.price) ? formatCurrency(p.price) : 'N/A';
+        const category = (p.category || 'N/A').toString();
+        return [address, suburb, price, category];
       });
 
-      // Validate data
-      if (!Array.isArray(properties) || properties.length === 0) {
-        console.debug('No properties to generate PDF...');
+      if (!properties.length) {
+        console.debug('No properties to generate PDF');
         toast.warn('No properties available to generate PDF');
         return;
       }
 
-      // Generate PDF using the utility
+      const isValidTableData = tableData.every(
+        row => Array.isArray(row) && row.length === 4 && row.every(cell => typeof cell === 'string' && cell != null)
+      );
+      if (!isValidTableData) {
+        console.error('Invalid tableData:', { sample: tableData.slice(0, 2), totalRows: tableData.length });
+        throw new Error('Invalid table data: All cells must be non-null strings');
+      }
+
+      console.debug('PDF input data:', {
+        headers,
+        tableDataSample: tableData.slice(0, 2),
+        totalRows: tableData.length,
+        profileName: profile?.name || 'Unknown',
+        timestamp: new Date().toISOString(),
+      });
+
       const fileName = `agent_dashboard_report_${new Date().toISOString().split('T')[0]}.pdf`;
-      const output = action === 'preview' ? 'datauristring' : 'save';
+      const output = action === 'preview' ? 'datauristring' : 'blob';
       const result = await generatePdf(
         `Agent Property Report - ${profile?.name || 'Agent'}`,
         headers,
@@ -544,23 +626,66 @@ export function AgentDashboard() {
         output
       );
 
-      if (action === 'preview' && typeof result === 'string') {
+      console.debug('generatePdf result:', {
+        action,
+        type: typeof result,
+        isBlob: result instanceof Blob,
+        dataUrlPrefix: typeof result === 'string' ? result.substring(0, 50) : 'N/A',
+        dataLength: typeof result === 'string' ? result.length : result instanceof Blob ? result.size : 'N/A',
+        timestamp: new Date().toISOString(),
+      });
+
+      if (action === 'preview') {
+        if (typeof result !== 'string' || !result.startsWith('data:application/pdf;base64,')) {
+          throw new Error(`Invalid PDF data URL: ${typeof result}`);
+        }
+        const base64Part = result.split(',')[1];
+        if (!base64Part || base64Part.length < 100) {
+          throw new Error(`Invalid PDF data URL: Base64 content too short (${base64Part.length} characters)`);
+        }
+        try {
+          atob(base64Part);
+          console.debug('Base64 decoding successful');
+        } catch (e) {
+          console.error('Invalid base64 content:', e);
+          throw new Error('Invalid base64 content in PDF data URL');
+        }
         setPdfDataUrl(result);
         setShowPreviewModal(true);
-        console.debug('PDF preview generated successfully');
+        console.debug('PDF preview set, data URL length:', base64Part.length);
         toast.success('PDF preview ready!');
       } else {
-        console.debug('PDF generated successfully:', fileName);
+        if (!(result instanceof Blob)) {
+          throw new Error(`Expected Blob for save, got ${typeof result}`);
+        }
+        const url = URL.createObjectURL(result);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        console.debug('PDF downloaded successfully:', fileName);
         toast.success('PDF report downloaded successfully!');
       }
     } catch (error: any) {
       console.error(`Error generating PDF ${action}:`, {
         message: error.message,
         stack: error.stack,
-        properties: properties.length,
-        suburbProgress: suburbProgress.length,
+        propertiesCount: properties.length,
+        sampleProperties: properties.slice(0, 2).map(p => ({
+          id: p.id,
+          address: p.address,
+          suburb: p.suburb,
+          price: p.price,
+          category: p.category,
+        })),
+        timestamp: new Date().toISOString(),
       });
       toast.error(`Failed to generate PDF ${action}. Check console for details.`);
+      setShowPreviewModal(false);
+      setPdfDataUrl(null);
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -724,28 +849,52 @@ export function AgentDashboard() {
       {/* Modal for PDF Preview */}
       {showPreviewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[80vh] flex flex-col">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-[98vw] h-[98vh] flex flex-col">
             <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-xl font-semibold text-gray-800">PDF Preview</h2>
+              <h2 className="text-2xl font-semibold text-gray-800">PDF Preview</h2>
               <button
-                onClick={() => setShowPreviewModal(false)}
+                onClick={() => {
+                  setShowPreviewModal(false);
+                  setPdfDataUrl(null);
+                }}
                 className="text-gray-600 hover:text-gray-800"
               >
-                <X className="w-6 h-6" />
+                <X className="w-8 h-8" />
               </button>
             </div>
-            <div className="flex-grow p-4">
+            <div className="flex-grow p-8 overflow-auto">
               {pdfDataUrl ? (
-                <iframe
-                  src={pdfDataUrl}
-                  className="w-full h-full border-0"
-                  title="PDF Preview"
-                />
+                pdfDataUrl.startsWith('blob:') ? (
+                  <iframe
+                    src={pdfDataUrl}
+                    className="w-full h-full"
+                    title="PDF Preview"
+                  />
+                ) : (
+                  <>
+                    <canvas ref={pdfCanvasRef} className="w-full h-auto max-h-[80vh] mx-auto" />
+                    <p className="text-sm text-gray-600 mt-4">
+                      If the preview fails to load, try downloading the PDF or check the console for details.
+                    </p>
+                    {showDebug && (
+                      <p className="text-sm text-yellow-600 mt-2">
+                        Debug: Check console for errors (e.g., 'Error rendering PDF with pdf.js'). Ensure properties data is valid and pdf.js worker is accessible.
+                      </p>
+                    )}
+                  </>
+                )
               ) : (
                 <p className="text-gray-600">Loading preview...</p>
               )}
             </div>
-            <div className="flex justify-end p-4 border-t">
+            <div className="flex justify-end p-4 border-t gap-4">
+              <button
+                onClick={() => generateReport('preview')}
+                className="bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                disabled={isGeneratingPDF}
+              >
+                <Eye className="w-5 h-5" /> Retry Preview
+              </button>
               <button
                 onClick={() => generateReport('save')}
                 className="bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 flex items-center gap-2"
@@ -802,6 +951,7 @@ export function AgentDashboard() {
           <h3 className="text-lg font-semibold text-gray-800">Debug Information</h3>
           <p className="text-sm text-gray-600">Available Categories: {availableCategories.join(', ') || 'None'}</p>
           <p className="text-sm text-gray-600">Current Filter: {filters.categories.join(', ') || 'None'}</p>
+          <p className="text-sm text-gray-600">Properties Count: {properties.length}</p>
           <button
             onClick={fetchAvailableCategories}
             className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
