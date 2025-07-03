@@ -124,7 +124,7 @@ function App() {
             <Route path="/admin-dashboard" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
             <Route path="/agent-dashboard" element={<AgentRoute><AgentDashboard /></AgentRoute>} />
             <Route path="/agent-management" element={<AgentRoute><AgentManagement /></AgentRoute>} />
-            <Route path="/agent-reports" element={<AgentRoute><AgentReports /></AgentRoute>} />
+            <Route path="/agent-reports" element={<AgentReports />} />
             <Route path="/agent-dashboard/door-knocks" element={<AgentRoute><DoorKnocks /></AgentRoute>} />
             <Route path="/agent-dashboard/phone-calls" element={<AgentRoute><PhoneCalls /></AgentRoute>} />
             <Route path="/marketing-plan" element={<MarketingPlanPage />} />

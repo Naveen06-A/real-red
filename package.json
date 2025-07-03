@@ -13,7 +13,7 @@
     "@headlessui/react": "^2.2.4",
     "@react-pdf/renderer": "^4.3.0",
     "@sendgrid/mail": "^8.1.5",
-    "@supabase/supabase-js": "^2.50.2",
+    "@supabase/supabase-js": "^2.50.3",
     "@tanstack/react-table": "^8.21.3",
     "@tensorflow/tfjs": "^4.22.0",
     "@turf/turf": "^7.2.0",

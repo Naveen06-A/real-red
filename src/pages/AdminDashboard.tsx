@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { UserPlus, Home, FileText, Activity, BarChart } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
-import { CreateAgentModal } from '../components/CreateAgentModal';
+import { CreateAgentModal } from './AgentManagement';
 import { Agent, Property } from '../types';
 
 export function AdminDashboard() {
@@ -34,11 +34,8 @@ export function AdminDashboard() {
   const [jumpToPage, setJumpToPage] = useState('');
 
   const dashboardLinks = [
-    { name: 'Create New Agent', icon: UserPlus, action: () => {
-      console.log('Opening Create Agent Modal'); // Debug log
-      setShowModal('agent');
-    }},
-    { name: 'Add Property', icon: Home, action: () => setShowModal('property') },
+    { name: 'Create New Agent', icon: UserPlus, action: () => setShowModal('agent') },
+    { name: 'Add Property', icon: Home, path: '/property-form'},
     { name: 'Create Marketing Plan', path: '/marketing-plan', icon: FileText },
     { name: 'Activity Log', path: '/activity-logger', icon: Activity },
     { name: 'Progress Report', path: '/progress-report-page', icon: BarChart },
@@ -48,12 +45,18 @@ export function AdminDashboard() {
 
   const fetchAgents = async () => {
     try {
-      // Changed to fetch from 'agents' table to match CreateAgentModal
       const { data, error } = await supabase
-        .from('agents')
-        .select('id, email, name, phone')
+        .from('profiles')
+        .select('id, email, name, phone, permissions')
         .eq('role', 'agent');
       if (error) throw error;
+      console.log('Fetched agents:', data);
+      data?.forEach((agent, index) => {
+        if (!agent.permissions) {
+          console.warn(`Agent at index ${index} has no permissions:`, agent);
+          toast.error(`Agent ${agent.email} has no permissions set`);
+        }
+      });
       setAgents(data || []);
       setError(null);
       return data;
@@ -205,7 +208,6 @@ export function AdminDashboard() {
           className="flex items-center px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-full hover:from-green-700 hover:to-green-800 transition-all shadow-md"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          title="Back to dashboard"
         >
           Back to Dashboard
         </motion.button>
@@ -217,7 +219,6 @@ export function AdminDashboard() {
             className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer"
             whileHover={{ scale: 1.05 }}
             onClick={() => {
-              console.log('Clicked:', link.name); // Debug log
               if (link.action) {
                 link.action();
               } else if (link.path) {
@@ -235,10 +236,7 @@ export function AdminDashboard() {
 
       <CreateAgentModal
         isOpen={showModal === 'agent'}
-        onClose={() => {
-          console.log('Closing Create Agent Modal'); // Debug log
-          setShowModal(null);
-        }}
+        onClose={() => setShowModal(null)}
         fetchAgents={fetchAgents}
         fetchProperties={fetchProperties}
       />
@@ -349,11 +347,13 @@ export function AdminDashboard() {
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
                 >
                   <option value="">No Agent</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))}
+                  {agents
+                    .filter(agent => agent && agent.permissions?.canRegisterProperties) // Only agents with permission
+                    .map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name || agent.email}
+                      </option>
+                    ))}
                 </select>
               </div>
               <div className="flex justify-end gap-4">
@@ -381,7 +381,9 @@ export function AdminDashboard() {
         <h2 className="text-2xl font-semibold mb-4 flex items-center">
           <UserPlus className="w-6 h-6 mr-2" /> Agents
         </h2>
-        {agents.length > 0 ? (
+        {loading ? (
+          <div className="text-center text-gray-600">Loading agents...</div>
+        ) : agents.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
@@ -392,13 +394,15 @@ export function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {agents.map((agent) => (
-                  <tr key={agent.id} className="border-b hover:bg-gray-50">
-                    <td className="py-2 px-4">{agent.name}</td>
-                    <td className="py-2 px-4">{agent.email}</td>
-                    <td className="py-2 px-4">{agent.phone}</td>
-                  </tr>
-                ))}
+                {agents
+                  .filter(agent => agent && agent.permissions) // Filter valid agents
+                  .map((agent) => (
+                    <tr key={agent.id} className="border-b hover:bg-gray-50">
+                      <td className="py-2 px-4">{agent.name || '-'}</td>
+                      <td className="py-2 px-4">{agent.email}</td>
+                      <td className="py-2 px-4">{agent.phone || '-'}</td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
@@ -456,16 +460,23 @@ export function AdminDashboard() {
                           <td className="py-2 px-4">{property.car_garage}</td>
                           <td className="py-2 px-4">{property.category}</td>
                           <td className="py-2 px-4">
-                            {property.agent_id
-                              ? agent
-                                ? agent.name
-                                : <span className="text-red-600">Invalid Agent ID<button
+                            {property.agent_id ? (
+                              agent ? (
+                                agent.name || agent.email
+                              ) : (
+                                <span className="text-red-600">
+                                  Invalid Agent ID
+                                  <button
                                     onClick={() => fetchAgents()}
                                     className="ml-2 text-sm text-blue-600 underline"
                                   >
                                     Retry
-                                  </button></span>
-                              : 'Unassigned'}
+                                  </button>
+                                </span>
+                              )
+                            ) : (
+                              'Unassigned'
+                            )}
                           </td>
                         </motion.tr>
                       );
@@ -506,9 +517,7 @@ export function AdminDashboard() {
                       key={page}
                       onClick={() => handlePageChange(page)}
                       className={`px-3 py-1 rounded-md ${
-                        currentPage === page
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.9 }}
