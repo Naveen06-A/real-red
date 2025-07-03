@@ -31,7 +31,7 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
   });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ id: string; email: string; name: string; phone: string; password: string } | null>(null);
-  const DCCa = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Added isLoading state
 
   const handleCreateAgent = useCallback(async () => {
     try {
@@ -132,42 +132,6 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
 
       console.log('Agent successfully upserted for user:', data.user.id);
 
-      // Optional: Insert into profiles table (comment out if not needed)
-      /*
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert(
-          {
-            id: data.user.id,
-            email: agentDetails.email,
-            name: agentDetails.name,
-            phone: agentDetails.phone,
-            role: 'agent',
-          },
-          { onConflict: 'id' }
-        );
-
-      if (profileError) {
-        console.error('Profile upsert error:', {
-          message: profileError.message,
-          code: profileError.code,
-          details: profileError,
-          userId: data.user.id,
-        });
-        throw new Error(`Failed to create profile: ${profileError.message}`);
-      }
-
-      console.log('Profile successfully upserted for user:', data.user.id);
-      */
-
-      // Fetch profile
-      try {
-        await useAuthStore.getState().fetchProfile(data.user.id, agentDetails.email);
-        console.log('Profile fetched successfully for user:', data.user.id);
-      } catch (profileFetchError) {
-        console.warn('Profile fetch failed, but continuing:', profileFetchError);
-      }
-
       setSuccess({
         id: data.user.id,
         email: agentDetails.email,
@@ -262,6 +226,7 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
     setAgentDetails({ email: '', name: '', phone: '', password: '', confirmPassword: '' });
     setSuccess(null);
     setError(null);
+    setIsLoading(false);
     onClose();
   };
 
@@ -478,30 +443,40 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
                   {error}
                 </motion.p>
               )}
-              <button
-                onClick={handleCreateAgent}
-                disabled={isLoading}
-                className={`w-full py-3 rounded-lg text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 ${
-                  isLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-                aria-label="Create agent account"
-              >
-                {isLoading ? (
-                  <span className="flex items-center justify-center">
-                    <svg className="animate-spin h-5 w-5 mr-2 text-white" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    Creating...
-                  </span>
-                ) : (
-                  'Create Agent'
-                )}
-              </button>
+              <div className="flex justify-between gap-2">
+                <button
+                  onClick={handleClose}
+                  disabled={isLoading}
+                  className="px-4 py-2 text-gray-600 rounded-md hover:bg-gray-100"
+                  aria-label="Cancel"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateAgent}
+                  disabled={isLoading}
+                  className={`px-4 py-2 rounded-lg text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 ${
+                    isLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                  aria-label="Create agent account"
+                >
+                  {isLoading ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin h-5 w-5 mr-2 text-white" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      Creating...
+                    </span>
+                  ) : (
+                    'Create Agent'
+                  )}
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

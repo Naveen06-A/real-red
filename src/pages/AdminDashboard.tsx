@@ -34,8 +34,11 @@ export function AdminDashboard() {
   const [jumpToPage, setJumpToPage] = useState('');
 
   const dashboardLinks = [
-    { name: 'Create New Agent', icon: UserPlus, action: () => setShowModal('agent') }, // Trigger modal
-    { name: 'Add Property', icon: Home, action: () => setShowModal('property') }, // Trigger property modal
+    { name: 'Create New Agent', icon: UserPlus, action: () => {
+      console.log('Opening Create Agent Modal'); // Debug log
+      setShowModal('agent');
+    }},
+    { name: 'Add Property', icon: Home, action: () => setShowModal('property') },
     { name: 'Create Marketing Plan', path: '/marketing-plan', icon: FileText },
     { name: 'Activity Log', path: '/activity-logger', icon: Activity },
     { name: 'Progress Report', path: '/progress-report-page', icon: BarChart },
@@ -45,8 +48,9 @@ export function AdminDashboard() {
 
   const fetchAgents = async () => {
     try {
+      // Changed to fetch from 'agents' table to match CreateAgentModal
       const { data, error } = await supabase
-        .from('profiles')
+        .from('agents')
         .select('id, email, name, phone')
         .eq('role', 'agent');
       if (error) throw error;
@@ -231,7 +235,10 @@ export function AdminDashboard() {
 
       <CreateAgentModal
         isOpen={showModal === 'agent'}
-        onClose={() => setShowModal(null)}
+        onClose={() => {
+          console.log('Closing Create Agent Modal'); // Debug log
+          setShowModal(null);
+        }}
         fetchAgents={fetchAgents}
         fetchProperties={fetchProperties}
       />

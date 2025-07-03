@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -18,7 +17,6 @@ interface Agent {
   };
   name?: string;
   phone?: string;
-  last_sign_in_at?: string;
 }
 
 interface AgentDetails {
@@ -311,7 +309,7 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
       Phone: ${success.phone}
       Password: ${success.password}
     `;
-    const blob = new Blob([details], { type: 'text/plain' });
+    const blob = new Blob([details],ONO, { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -623,7 +621,7 @@ export function AgentManagement() {
       console.log('Fetching agents from profiles table');
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, role, permissions, name, phone, last_sign_in_at')
+        .select('id, email, role, permissions, name, phone')
         .in('role', ['agent', 'admin']);
       if (error) {
         console.error('Supabase fetch error:', {
@@ -1032,9 +1030,7 @@ export function AgentManagement() {
               </p>
               <p className="text-gray-700">
                 Password:{' '}
-                <span className="font-mono font-semibold">
-                  {showDetailsModal.password || 'Not available'}
-                </span>
+                <span className="font-mono font-semibold">{showDetailsModal.password || 'Not available'}</span>
                 <button
                   onClick={() => copyToClipboard(showDetailsModal.password || 'Not available', 'Password')}
                   className="ml-2 text-blue-600 hover:text-blue-800 focus:outline-none"
@@ -1042,12 +1038,6 @@ export function AgentManagement() {
                 >
                   <Copy className="w-4 h-4 inline" />
                 </button>
-              </p>
-              <p className="text-gray-700">
-                Status:{' '}
-                <span className={`font-semibold ${showDetailsModal.last_sign_in_at ? 'text-green-600' : 'text-red-600'}`}>
-                  {showDetailsModal.last_sign_in_at ? 'Active' : 'Inactive'}
-                </span>
               </p>
             </div>
             <div className="flex justify-between gap-2 mt-4">
@@ -1102,7 +1092,6 @@ export function AgentManagement() {
                 <th className="text-left py-2">Email</th>
                 <th className="text-left py-2">Name</th>
                 <th className="text-left py-2">Role</th>
-                <th className="text-left py-2">Status</th>
                 <th className="text-left py-2">Permissions</th>
                 <th className="text-left py-2">Actions</th>
               </tr>
@@ -1113,11 +1102,6 @@ export function AgentManagement() {
                   <td className="py-2">{agent.email}</td>
                   <td className="py-2">{agent.name || '-'}</td>
                   <td className="py-2">{agent.role}</td>
-                  <td className="py-2">
-                    <span className={agent.last_sign_in_at ? 'text-green-600' : 'text-red-600'}>
-                      {agent.last_sign_in_at ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
                   <td className="py-2">
                     <div className="flex items-center space-x-2">
                       {agent.permissions.canRegisterProperties && (
@@ -1149,7 +1133,7 @@ export function AgentManagement() {
                       className="p-1 text-blue-600 hover:text-blue-800 ml-2"
                       aria-label="Edit Agent"
                     >
-                      <Pencil className="w-4 h-4" />
+12                    <Pencil className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => {
