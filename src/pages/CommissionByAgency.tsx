@@ -1,4 +1,3 @@
-
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import {
@@ -46,6 +45,16 @@ interface User {
   role?: string;
 }
 
+interface SuburbCommission {
+  suburb: string;
+  listedCommissionTotal: number;
+  listedPropertyCount: number;
+  soldCommissionTotal: number;
+  soldPropertyCount: number;
+  avgListedCommissionRate: number;
+  avgSoldCommissionRate: number;
+}
+
 interface CommissionSummary {
   totalCommission: number;
   totalListedCommission: number;
@@ -60,6 +69,7 @@ interface CommissionSummary {
   topAgent: { name: string; commission: number; propertyCount: number };
   agencyPropertyCounts: Record<string, number>;
   topStreet: { street: string; listedCount: number; commission: number };
+  suburbCommissions: SuburbCommission[];
 }
 
 interface AgencyTotal {
@@ -248,6 +258,7 @@ function CommissionByAgency() {
     agencies: true,
     agents: true,
     streets: true,
+    suburbs: true,
   });
   const [commissionEdit, setCommissionEdit] = useState<CommissionEditState>({
     isOpen: false,
@@ -264,7 +275,7 @@ function CommissionByAgency() {
   const [isUpdatingAgentCommission, setIsUpdatingAgentCommission] = useState(false);
   const itemsPerPage = 10;
   const ourAgencyName = 'Harcourts Success';
-  const ourAgentName = 'John Smith'; // Example agent name
+  const ourAgentName = 'John Smith';
   const { user } = useAuthStore((state: { user: User | null }) => ({ user: state.user }));
   const isAdmin = user?.role === 'admin';
   const navigate = useNavigate();
@@ -274,14 +285,12 @@ function CommissionByAgency() {
       setIsLoading(true);
       setFetchError(null);
       try {
-        // Fetch properties
         const { data: propertiesData, error: propertiesError } = await supabase
           .from('properties')
           .select('id, agency_name, property_type, commission, price, sold_price, suburb, street_name, street_number, agent_name, postcode, category, listed_date, sale_type, expected_price, features, flood_risk, bushfire_risk, contract_status, same_street_sales, past_records, sold_date');
 
         if (propertiesError) throw propertiesError;
 
-        // Fetch agent commissions
         const { data: agentCommissionsData, error: agentCommissionsError } = await supabase
           .from('agent_commissions')
           .select('id, property_id, agent_name, commission_rate');
@@ -523,6 +532,14 @@ function CommissionByAgency() {
     let topAgent = { name: 'Unknown', commission: 0, propertyCount: 0 };
     const agencyPropertyCounts: Record<string, number> = {};
     const streetMap: Record<string, { listedCount: number; commission: number }> = {};
+    const suburbMap: Record<string, {
+      listedCommissionTotal: number;
+      listedPropertyCount: number;
+      soldCommissionTotal: number;
+      soldPropertyCount: number;
+      listedCommissionRates: number[];
+      soldCommissionRates: number[];
+    }> = {};
 
     if (!internalCommissionData || !internalProperties) {
       console.warn('Missing commission data or properties:', { internalCommissionData, internalProperties });
@@ -539,7 +556,8 @@ function CommissionByAgency() {
         topAgencyPropertyCount,
         topAgent,
         agencyPropertyCounts,
-        topStreet: { street: 'None', listedCount: 0, commission: 0 }
+        topStreet: { street: 'None', listedCount: 0, commission: 0 },
+        suburbCommissions: [],
       };
     }
 
@@ -552,24 +570,46 @@ function CommissionByAgency() {
     internalProperties.forEach((property) => {
       const agency = normalizeAgencyName(property.agency_name);
       const agent = normalizeAgentName(property.agent_name);
+      const suburb = normalizeSuburbName(property.suburb);
       const { commissionEarned, commissionRate } = calculateCommission(property, agentCommissions);
-      const street = `${property.street_name || 'Unknown'}, ${normalizeSuburbName(property.suburb)}`;
+      const street = `${property.street_name || 'Unknown'}, ${suburb}`;
       const isSold = property.contract_status === 'sold' || !!property.sold_date;
 
       if (agency && !isNaN(commissionEarned)) {
         agencyPropertyCounts[agency] = (agencyPropertyCounts[agency] || 0) + 1;
         totalProperties += 1;
-        totalListed += 1;
-        totalListedCommission += commissionEarned;
         if (isSold) {
           totalSold += 1;
           totalSoldCommission += commissionEarned;
+        } else {
+          totalListed += 1;
+          totalListedCommission += commissionEarned;
         }
         if (commissionEarned > 0) {
           totalCommission += commissionEarned;
           if (internalAgentData[agent]?.commission > topAgent.commission) {
             topAgent = { name: agent, commission: internalAgentData[agent].commission, propertyCount: internalAgentData[agent].listed };
           }
+        }
+      }
+
+      if (suburb && !isNaN(commissionEarned)) {
+        suburbMap[suburb] = suburbMap[suburb] || {
+          listedCommissionTotal: 0,
+          listedPropertyCount: 0,
+          soldCommissionTotal: 0,
+          soldPropertyCount: 0,
+          listedCommissionRates: [],
+          soldCommissionRates: [],
+        };
+        if (isSold) {
+          suburbMap[suburb].soldCommissionTotal += commissionEarned;
+          suburbMap[suburb].soldPropertyCount += 1;
+          suburbMap[suburb].soldCommissionRates.push(commissionRate);
+        } else {
+          suburbMap[suburb].listedCommissionTotal += commissionEarned;
+          suburbMap[suburb].listedPropertyCount += 1;
+          suburbMap[suburb].listedCommissionRates.push(commissionRate);
         }
       }
 
@@ -608,6 +648,20 @@ function CommissionByAgency() {
       { street: 'None', listedCount: 0, commission: 0 }
     );
 
+    const suburbCommissions: SuburbCommission[] = Object.entries(suburbMap).map(([suburb, data]) => ({
+      suburb,
+      listedCommissionTotal: data.listedCommissionTotal,
+      listedPropertyCount: data.listedPropertyCount,
+      soldCommissionTotal: data.soldCommissionTotal,
+      soldPropertyCount: data.soldPropertyCount,
+      avgListedCommissionRate: data.listedCommissionRates.length > 0
+        ? data.listedCommissionRates.reduce((sum, rate) => sum + rate, 0) / data.listedCommissionRates.length
+        : 0,
+      avgSoldCommissionRate: data.soldCommissionRates.length > 0
+        ? data.soldCommissionRates.reduce((sum, rate) => sum + rate, 0) / data.soldCommissionRates.length
+        : 0,
+    }));
+
     return {
       totalCommission,
       totalListedCommission,
@@ -621,7 +675,8 @@ function CommissionByAgency() {
       topAgencyPropertyCount,
       topAgent,
       agencyPropertyCounts,
-      topStreet
+      topStreet,
+      suburbCommissions,
     };
   }, [internalCommissionData, internalProperties, internalAgentData, agentCommissions]);
 
@@ -660,10 +715,12 @@ function CommissionByAgency() {
     return Object.entries(internalCommissionData)
       .map(([agency, types]) => {
         const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === agency);
-        const listedCommission = properties.reduce((sum, p) => {
-          const { commissionEarned } = calculateCommission(p, agentCommissions);
-          return sum + (isNaN(commissionEarned) ? 0 : commissionEarned);
-        }, 0);
+        const listedCommission = properties
+          .filter((p) => !(p.contract_status === 'sold' || !!p.sold_date))
+          .reduce((sum, p) => {
+            const { commissionEarned } = calculateCommission(p, agentCommissions);
+            return sum + (isNaN(commissionEarned) ? 0 : commissionEarned);
+          }, 0);
         const soldCommission = properties
           .filter((p) => p.contract_status === 'sold' || !!p.sold_date)
           .reduce((sum, p) => {
@@ -684,7 +741,7 @@ function CommissionByAgency() {
           soldCommission,
           commissionRate,
           propertyCount: properties.length,
-          listedCount: properties.length,
+          listedCount: properties.filter((p) => !(p.contract_status === 'sold' || !!p.sold_date)).length,
           soldCount: properties.filter((p) => p.contract_status === 'sold' || !!p.sold_date).length,
           suburbs: Array.from(agencySuburbsMap[agency] || []),
           agents: agencyAgentsMap[agency] || [],
@@ -715,6 +772,11 @@ function CommissionByAgency() {
         .sort((a, b) => b.commission - a.commission)
         .slice(0, 5),
     [internalAgentData]
+  );
+
+  const topFiveSuburbs = useMemo(
+    () => summary.suburbCommissions.slice(0, 5).map((row) => row.suburb),
+    [summary.suburbCommissions]
   );
 
   const handlePageChange = (page: number) => {
@@ -849,6 +911,86 @@ function CommissionByAgency() {
     },
   };
 
+  const suburbChartData = useMemo(
+    () => ({
+      labels: topFiveSuburbs,
+      datasets: [
+        {
+          label: 'Avg Listed Commission',
+          data: topFiveSuburbs.map((suburb) => {
+            const data = summary.suburbCommissions.find((s) => s.suburb === suburb);
+            return data ? data.listedCommissionTotal / (data.listedPropertyCount || 1) : 0;
+          }),
+          backgroundColor: 'rgba(54, 162, 235, 0.8)',
+          borderColor: '#36A2EB',
+          borderWidth: 2,
+        },
+        {
+          label: 'Avg Sold Commission',
+          data: topFiveSuburbs.map((suburb) => {
+            const data = summary.suburbCommissions.find((s) => s.suburb === suburb);
+            return data ? data.soldCommissionTotal / (data.soldPropertyCount || 1) : 0;
+          }),
+          backgroundColor: 'rgba(255, 99, 132, 0.8)',
+          borderColor: '#FF6384',
+          borderWidth: 2,
+        },
+      ],
+    }),
+    [topFiveSuburbs, summary.suburbCommissions]
+  );
+
+  const suburbChartOptions: ChartOptions<'bar'> = {
+    plugins: {
+      legend: { position: 'top', labels: { font: { size: 14, family: 'Inter' } } },
+      title: { display: true, text: 'Average Commission by Suburb', font: { size: 18, weight: 'bold', family: 'Inter' } },
+      tooltip: {
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        titleFont: { size: 14, family: 'Inter' },
+        bodyFont: { size: 12, family: 'Inter' },
+        callbacks: {
+          label: (context) => {
+            const value = context.parsed.y;
+            const suburb = context.label;
+            const label = context.dataset.label;
+            const data = summary.suburbCommissions.find((s) => s.suburb === suburb);
+            return `${label} in ${suburb}: ${formatCurrency(value)}\nProperties: ${label.includes('Listed') ? data?.listedPropertyCount || 0 : data?.soldPropertyCount || 0}\nAvg Rate: ${(label.includes('Listed') ? data?.avgListedCommissionRate : data?.avgSoldCommissionRate)?.toFixed(2) || 0}%`;
+          },
+        },
+      },
+      datalabels: {
+        display: (context) => context.dataset.data[context.dataIndex] > 0,
+        formatter: (value: number) => formatCurrency(value),
+        color: '#fff',
+        font: { size: 10, family: 'Inter', weight: 'bold' },
+        anchor: 'end',
+        align: 'top',
+        offset: 5,
+      },
+    },
+    scales: {
+      x: {
+        ticks: { font: { size: 12, family: 'Inter' } },
+        grid: { display: false },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          callback: (value) => formatCurrency(value as number),
+          font: { size: 12, family: 'Inter' },
+        },
+        title: { display: true, text: 'Average Commission (AUD)', font: { size: 14, family: 'Inter' } },
+        grid: { color: 'rgba(0, 0, 0, 0.1)' },
+      },
+    },
+    animation: {
+      duration: 1500,
+      easing: 'easeOutQuart',
+    },
+    maintainAspectRatio: false,
+    responsive: true,
+  };
+
   interface JsPDFWithAutoTable extends jsPDF {
     autoTable: (content: { head: string[][]; body: string[][] }, options?: any) => void;
     lastAutoTable: { finalY: number };
@@ -921,6 +1063,23 @@ function CommissionByAgency() {
       bodyStyles: { fontSize: 10, font: 'Inter' },
     });
 
+    doc.autoTable({
+      head: [['Suburb', 'Avg Listed Commission Rate', 'Listed Commission', 'Listed Properties', 'Avg Sold Commission Rate', 'Sold Commission', 'Sold Properties']],
+      body: summary.suburbCommissions.map((row) => [
+        row.suburb,
+        `${row.avgListedCommissionRate.toFixed(2)}%`,
+        formatCurrency(row.listedCommissionTotal),
+        row.listedPropertyCount.toString(),
+        `${row.avgSoldCommissionRate.toFixed(2)}%`,
+        formatCurrency(row.soldCommissionTotal),
+        row.soldPropertyCount.toString(),
+      ]),
+      startY: doc.lastAutoTable.finalY + 20,
+      theme: 'striped',
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], font: 'Inter' },
+      bodyStyles: { fontSize: 10, font: 'Inter' },
+    });
+
     doc.save('commission_report.pdf');
     toast.success('Commission report exported as PDF');
   };
@@ -969,6 +1128,18 @@ function CommissionByAgency() {
         data.sold.toString(),
         name === ourAgentName && agencyTotals.some((a) => a.agency === ourAgencyName && a.agents.some((ag) => ag.name === name)) ? 'Yes' : 'No',
       ]),
+      [],
+      ['Suburb Totals'],
+      ['Suburb', 'Avg Listed Commission Rate', 'Listed Commission', 'Listed Properties', 'Avg Sold Commission Rate', 'Sold Commission', 'Sold Properties'],
+      ...summary.suburbCommissions.map((row) => [
+        row.suburb,
+        `${row.avgListedCommissionRate.toFixed(2)}%`,
+        formatCurrency(row.listedCommissionTotal),
+        row.listedPropertyCount.toString(),
+        `${row.avgSoldCommissionRate.toFixed(2)}%`,
+        formatCurrency(row.soldCommissionTotal),
+        row.soldPropertyCount.toString(),
+      ]),
     ];
 
     const ws = utils.array_to_sheet(data);
@@ -1002,7 +1173,7 @@ function CommissionByAgency() {
     if (statusFilter !== 'all') {
       filtered = filtered.filter((row) => {
         const properties = internalProperties.filter((p) => normalizeAgencyName(p.agency_name) === row.agency);
-        return properties.some((p) => (statusFilter === 'sold' ? p.contract_status === 'sold' || !!p.sold_date : true));
+        return properties.some((p) => (statusFilter === 'sold' ? p.contract_status === 'sold' || !!p.sold_date : !(p.contract_status === 'sold' || !!p.sold_date)));
       });
     }
     if (dateRange !== 'all') {
@@ -1016,11 +1187,42 @@ function CommissionByAgency() {
     return filtered;
   }, [agencyTotals, searchQuery, statusFilter, dateRange, internalProperties]);
 
+  const filteredSuburbCommissions = useMemo(() => {
+    let filtered = summary.suburbCommissions;
+    if (searchQuery) {
+      filtered = filtered.filter((row) => row.suburb.toLowerCase().includes(searchQuery.toLowerCase()));
+    }
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((row) => {
+        const properties = internalProperties.filter((p) => normalizeSuburbName(p.suburb) === row.suburb);
+        return properties.some((p) => (statusFilter === 'sold' ? p.contract_status === 'sold' || !!p.sold_date : !(p.contract_status === 'sold' || !!p.sold_date)));
+      });
+    }
+    if (dateRange !== 'all') {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - (dateRange === 'last30' ? 30 : 90));
+      filtered = filtered.filter((row) => {
+        const properties = internalProperties.filter((p) => normalizeSuburbName(p.suburb) === row.suburb);
+        return properties.some((p) => (p.listed_date ? new Date(p.listed_date) >= cutoffDate : false));
+      });
+    }
+    return filtered;
+  }, [summary.suburbCommissions, searchQuery, statusFilter, dateRange, internalProperties]);
+
   const paginatedFilteredAgencyTotals = filteredAgencyTotals.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-  const filteredTotalPages = Math.ceil(filteredAgencyTotals.length / itemsPerPage);
+
+  const paginatedFilteredSuburbCommissions = filteredSuburbCommissions.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const filteredTotalPages = Math.max(
+    Math.ceil(filteredAgencyTotals.length / itemsPerPage),
+    Math.ceil(filteredSuburbCommissions.length / itemsPerPage)
+  );
 
   const filteredAgentData = useMemo(() => {
     let filtered = Object.entries(internalAgentData).map(([name, data]) => ({ name, ...data }));
@@ -1113,7 +1315,7 @@ function CommissionByAgency() {
           <div className="relative w-full sm:w-64 group">
             <input
               type="text"
-              placeholder="Search agencies..."
+              placeholder="Search agencies or suburbs..."
               value={searchQuery}
               onChange={handleSearch}
               className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full bg-gray-50"
@@ -1126,7 +1328,7 @@ function CommissionByAgency() {
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 mt-2">Search by agency name</div>
+            <div className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 mt-2">Search by agency or suburb name</div>
           </div>
           <div className="flex gap-2">
             {['all', 'listed', 'sold'].map((status) => (

@@ -1,3 +1,4 @@
+
 import {
   ArcElement,
   BarElement,
@@ -129,7 +130,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: '',
     agents: '',
     agency_names: '',
-    categories:'',
   });
   const [localFilterPreviewCount, setLocalFilterPreviewCount] = useState(filterPreviewCount || 0);
   const [localCurrentPage, setLocalCurrentPage] = useState(currentPage || 1);
@@ -142,7 +142,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: false,
     agents: false,
     agency_names: false,
-    categories: false,
   });
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -155,7 +154,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: filterSuggestions?.streetNumbers || [],
     agents: filterSuggestions?.agents || [],
     agency_names: filterSuggestions?.agency_names || [],
-    categories: ['Listing', 'Sold', 'Under Offer'], 
   });
 
   const propertiesTableRef = useRef<HTMLDivElement>(null);
@@ -222,15 +220,15 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
       const baseProperties = selectedSuburbs.length === 0
         ? filteredProperties
         : filteredProperties.filter((prop: PropertyDetails) =>
-            selectedSuburbs.some((suburb) => normalizeSuburb(prop.suburb || '') === normalizeSuburb(suburb))
+            prop && selectedSuburbs.some((suburb) => normalizeSuburb(prop.suburb || '') === normalizeSuburb(suburb))
           );
 
       const newSuggestions = {
         suburbs: filterSuggestions?.suburbs || [],
-        streetNames: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.street_name || '').filter(Boolean))],
-        streetNumbers: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.street_number || '').filter(Boolean))],
-        agents: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.agent_name || '').filter(Boolean))],
-        agency_names: [...new Set(baseProperties.map((prop: PropertyDetails) => prop.agency_name || 'Unknown').filter(Boolean))],
+        streetNames: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_name || '').filter(Boolean))],
+        streetNumbers: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_number || '').filter(Boolean))],
+        agents: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agent_name || '').filter(Boolean))],
+        agency_names: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agency_name || 'Unknown').filter(Boolean))],
       };
 
       setDynamicFilterSuggestions(newSuggestions);
@@ -243,7 +241,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         agency_names: prev.agency_names.filter((agency) => newSuggestions.agency_names.includes(agency)),
       }));
     } catch (err) {
-      console.error('Error updating filter suggestions:', err);
+      console.error('Error updating filter suggestions:', err, { selectedSuburbs, filteredProperties });
       toast.error('Failed to update filter suggestions');
     }
   };
@@ -372,10 +370,16 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     return <p className="text-red-600 text-center">Invalid property data</p>;
   }
 
-  const applyFilters = useCallback((newFilters: Filters) => {
+  const applyFilters = useCallback((newFilters: Filters, properties: PropertyDetails[]) => {
     try {
       console.log('Applying filters:', newFilters);
-      const filtered = filteredProperties.filter((prop: PropertyDetails) => {
+      console.log('Properties count before filtering:', properties.length);
+      const filtered = properties.filter((prop: PropertyDetails) => {
+        if (!prop || typeof prop !== 'object') {
+          console.warn('Invalid property encountered:', prop);
+          return false;
+        }
+
         const suburbMatch =
           newFilters.suburbs.length === 0 ||
           newFilters.suburbs.some((suburb: string) => normalizeSuburb(prop.suburb || '') === normalizeSuburb(suburb));
@@ -391,21 +395,22 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         const agencyMatch =
           newFilters.agency_names.length === 0 ||
           newFilters.agency_names.some((agency: string) => (prop.agency_name || 'Unknown').toLowerCase() === agency.toLowerCase());
-        const categoryMatch =
-          newFilters.categories.length === 0 ||
-          newFilters.categories.some((category: string) => (prop.category || '').toLowerCase() === category.toLowerCase());
 
-        return suburbMatch && streetNameMatch && streetNumberMatch && agentMatch && agencyMatch && categoryMatch;
+        return suburbMatch && streetNameMatch && streetNumberMatch && agentMatch && agencyMatch;
       });
-      console.log('Filtered properties:', filtered.length);
+      console.log('Filtered properties count:', filtered.length);
       setFilteredProperties(filtered);
       setLocalFilterPreviewCount(filtered.length);
       setLocalCurrentPage(1);
     } catch (err) {
-      console.error('Error applying filters:', err);
+      console.error('Error applying filters:', err, {
+        newFilters,
+        propertiesCount: properties.length,
+        sampleProperties: properties.slice(0, 2),
+      });
       toast.error('Failed to apply filters');
     }
-  }, [filteredProperties]);
+  }, []);
 
   const handleFilterChange = (filterType: keyof Filters, selected: Array<{ value: string; label: string }>) => {
     try {
@@ -416,7 +421,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         if (filterType === 'suburbs') {
           updateFilterSuggestions(newValues);
         }
-        applyFilters(newFilters);
+        applyFilters(newFilters, filteredProperties);
         localStorage.setItem('reportFilters', JSON.stringify(newFilters));
         return newFilters;
       });
@@ -444,7 +449,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           if (filterType === 'suburbs') {
             updateFilterSuggestions(newValues);
           }
-          applyFilters(newFilters);
+          applyFilters(newFilters, filteredProperties);
           localStorage.setItem('reportFilters', JSON.stringify(newFilters));
           return newFilters;
         });
@@ -458,11 +463,11 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
 
   const resetFilters = () => {
     try {
-      const emptyFilters: Filters = { suburbs: [], streetNames: [], streetNumbers: [], agents: [], agency_names: [] ,categories: []};
+      const emptyFilters: Filters = { suburbs: [], streetNames: [], streetNumbers: [], agents: [], agency_names: [] };
       console.log('Resetting filters');
       setLocalFilters(emptyFilters);
-      setLocalManualInputs({ suburbs: '', streetNames: '', streetNumbers: '', agents: '', agency_names: '' ,categories});
-      setExpandedFilters({ suburbs: false, streetNames: false, streetNumbers: false, agents: false, agency_names: false });
+      setLocalManualInputs({ suburbs: '', streetNames: '', streetNumbers: '', agents: '', agency_names: '' });
+      setExpandedFilters({ suburbs: false, streetNames: false, streetNumbers: false, agents: false });
       setFilteredProperties(initialFilteredProperties);
       setLocalFilterPreviewCount(initialFilteredProperties.length);
       setDynamicFilterSuggestions({
@@ -908,34 +913,94 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     }
   };
 
+  const calculateAveragePricesBySuburb = (properties: PropertyDetails[]) => {
+    const listedPriceBySuburb: { [key: string]: { total: number; count: number } } = {};
+    const soldPriceBySuburb: { [key: string]: { total: number; count: number } } = {};
+
+    properties.forEach((prop) => {
+      if (!prop || !prop.suburb) return;
+
+      const suburb = normalizeSuburb(prop.suburb);
+      
+      // Listed price
+      if (typeof prop.price === 'number' && prop.price > 0) {
+        if (!listedPriceBySuburb[suburb]) {
+          listedPriceBySuburb[suburb] = { total: 0, count: 0 };
+        }
+        listedPriceBySuburb[suburb].total += prop.price;
+        listedPriceBySuburb[suburb].count += 1;
+      }
+
+      // Sold price
+      if (typeof prop.sold_price === 'number' && prop.sold_price > 0) {
+        if (!soldPriceBySuburb[suburb]) {
+          soldPriceBySuburb[suburb] = { total: 0, count: 0 };
+        }
+        soldPriceBySuburb[suburb].total += prop.sold_price;
+        soldPriceBySuburb[suburb].count += 1;
+      }
+    });
+
+    const avgListedPriceBySuburb = Object.keys(listedPriceBySuburb).reduce(
+      (acc, suburb) => {
+        acc[suburb] = listedPriceBySuburb[suburb].total / listedPriceBySuburb[suburb].count;
+        return acc;
+      },
+      {} as { [key: string]: number }
+    );
+
+    const avgSoldPriceBySuburb = Object.keys(soldPriceBySuburb).reduce(
+      (acc, suburb) => {
+        acc[suburb] = soldPriceBySuburb[suburb].total / soldPriceBySuburb[suburb].count;
+        return acc;
+      },
+      {} as { [key: string]: number }
+    );
+
+    return { avgListedPriceBySuburb, avgSoldPriceBySuburb };
+  };
+
   const renderGeneralCharts = () => {
-    if (!propertyMetrics) {
-      console.warn('No property metrics for general charts');
+    if (!filteredProperties || filteredProperties.length === 0) {
+      console.warn('No properties available for general charts');
       return <p className="text-gray-500 text-center">No chart data available</p>;
     }
 
     try {
-      const avgPriceBySuburbData = {
-        labels: Object.keys(propertyMetrics.avgSalePriceBySuburb) || [],
+      const { avgListedPriceBySuburb, avgSoldPriceBySuburb } = calculateAveragePricesBySuburb(filteredProperties);
+
+      const listedPriceData = {
+        labels: Object.keys(avgListedPriceBySuburb),
         datasets: [
           {
-            label: 'Average Sale Price',
-            data: Object.values(propertyMetrics.avgSalePriceBySuburb) || [],
+            label: 'Average Listed Price',
+            data: Object.values(avgListedPriceBySuburb),
             backgroundColor: '#60A5FA',
           },
+        ],
+      };
+
+      const soldPriceData = {
+        labels: Object.keys(avgSoldPriceBySuburb),
+        datasets: [
           {
-            label: 'Predicted Average Price',
-            data: Object.values(propertyMetrics.predictedAvgPriceBySuburb) || [],
+            label: 'Average Sold Price',
+            data: Object.values(avgSoldPriceBySuburb),
             backgroundColor: '#93C5FD',
           },
         ],
       };
 
-      const avgPriceBySuburbOptions: ChartOptions<'bar'> = {
+      const chartOptions: ChartOptions<'bar'> = {
         plugins: {
           legend: { position: 'top', labels: { font: { size: 14 } } },
           datalabels: { display: false },
-          title: { display: true, text: 'Average Sale Price by Suburb', font: { size: 18, weight: 'bold' } },
+          title: { display: true, font: { size: 18, weight: 'bold' } },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.dataset.label}: ${formatCurrency(context.raw as number)}`,
+            },
+          },
         },
         scales: {
           y: {
@@ -945,8 +1010,29 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           x: { ticks: { font: { size: 12 } } },
         },
       };
+      const listedPriceOptions: ChartOptions<'bar'> = {
+      ...chartOptions,
+      plugins: {
+        ...chartOptions.plugins,
+        title: {
+          ...chartOptions.plugins.title,
+          text: 'Average Listed Price by Suburb',
+        },
+      },
+    };
 
-      return (
+    const soldPriceOptions: ChartOptions<'bar'> = {
+      ...chartOptions,
+      plugins: {
+        ...chartOptions.plugins,
+        title: {
+          ...chartOptions.plugins.title,
+          text: 'Average Sold Price by Suburb',
+        },
+      },
+    };
+
+    return (
         <div className="space-y-8">
           <motion.div
             className="bg-white p-6 rounded-xl shadow-lg border border-blue-100 hover:shadow-xl transition-all duration-300"
@@ -958,9 +1044,31 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
               <svg className="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
-              Average Sale Price by Suburb
+              Average Listed Price by Suburb
             </h2>
-            <Bar data={avgPriceBySuburbData} options={avgPriceBySuburbOptions} />
+            {listedPriceData.labels.length > 0 ? (
+              <Bar data={listedPriceData} options= { listedPriceOptions} />
+            ) : (
+              <p className="text-gray-500 text-center">No listed price data available</p>
+            )}
+          </motion.div>
+          <motion.div
+            className="bg-white p-6 rounded-xl shadow-lg border border-blue-100 hover:shadow-xl transition-all duration-300"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+          >
+            <h2 className="text-2xl font-semibold text-blue-800 mb-4 flex items-center">
+              <svg className="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              Average Sold Price by Suburb
+            </h2>
+            {soldPriceData.labels.length > 0 ? (
+              <Bar data={soldPriceData} options={soldPriceOptions }  />
+            ) : (
+              <p className="text-gray-500 text-center">No sold price data available</p>
+            )}
           </motion.div>
         </div>
       );
@@ -1034,7 +1142,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                       streetNumbers: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
                       agents: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
                       agency_names: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
-                      categories: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
                     }[filterType]
                   } transition-colors`}
                   whileHover={{ scale: 1.02 }}
@@ -1044,8 +1151,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                   <span>
                     {filterType === 'agency_names'
                       ? 'Agency Name'
-                      : filterType === 'categories'
-                      ? 'Category'
                       : filterType.charAt(0).toUpperCase() + filterType.slice(1).replace(/s$/, '')}
                   </span>
                   <ChevronDown
@@ -1066,7 +1171,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                       value={localManualInputs[filterType]}
                       onChange={(e) => handleManualInputChange(filterType, e.target.value)}
                       onKeyDown={(e) => handleManualInputKeyDown(filterType, e)}
-                      placeholder={`Enter ${filterType === 'agency_names' ? 'agency name' :filterType === 'categories' ? 'category' : filterType.replace(/s$/, '')} and press Enter`}
+                      placeholder={`Enter ${filterType === 'agency_names' ? 'agency name' : filterType.replace(/s$/, '')} and press Enter`}
                       className="w-full p-3 mb-3 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all bg-blue-50"
                       aria-label={`Enter ${filterType.replace(/s$/, '')}`}
                     />
@@ -1078,7 +1183,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                       })) || []}
                       value={localFilters[filterType].map((item: string) => ({ value: item, label: item }))}
                       onChange={(selected) => handleFilterChange(filterType, selected)}
-                      placeholder={`Select ${filterType === 'agency_names' ? 'agency name' :filterType === 'categories' ? 'category' : filterType.replace(/s$/, '')}...`}
+                      placeholder={`Select ${filterType === 'agency_names' ? 'agency name' : filterType.replace(/s$/, '')}...`}
                       styles={selectStyles}
                       noOptionsMessage={() => 'No options available'}
                       className="basic-multi-select"
@@ -1322,7 +1427,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                       disabled={localCurrentPage === 1}
                       className="px-4 py-2 bg-blue-600 text-white rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
                       whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
                       aria-label="Previous page"
                     >
                       Previous
