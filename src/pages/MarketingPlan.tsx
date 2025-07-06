@@ -30,7 +30,7 @@ const PREDEFINED_SUBURBS = [
   'Pullenvale QLD 4069',
   'Brookfield QLD 4069',
   'Anstead QLD 4070',
-  'Chapel Hill QLD 4069',
+  'Chapell Hill QLD 4069',
   'Kenmore QLD 4069',
   'Kenmore Hills QLD 4069',
   'Fig Tree Pocket QLD 4069',
@@ -87,15 +87,6 @@ interface ActualProgress {
   phoneCallFaceToFaceAppraisals: { completed: number; target: number };
 }
 
-// NEW: Interface for sold property data
-interface SoldProperty {
-  id: string;
-  address: string;
-  sold_price: number;
-  sold_date: string;
-  suburb: string;
-}
-
 export function MarketingPlanPage() {
   const { user, profile } = useAuthStore();
   const navigate = useNavigate();
@@ -129,97 +120,21 @@ export function MarketingPlanPage() {
   const [selectedActivity, setSelectedActivity] = useState<'all' | 'door_knock' | 'phone_call'>('all');
   const [showPlansModal, setShowPlansModal] = useState(false);
   const [savedPlans, setSavedPlans] = useState<MarketingPlan[]>([]);
-  const [soldPropertiesFilter, setSoldPropertiesFilter] = useState<string>('30_days'); // For StreetSuggestions
-  // NEW: State for plan-specific sold properties filter
-  const [planSoldPropertiesFilter, setPlanSoldPropertiesFilter] = useState<string>('30_days');
-  // NEW: State for sold properties data
-  const [soldProperties, setSoldProperties] = useState<SoldProperty[]>([]);
-  // NEW: State for average sold price
-  const [averageSoldPrice, setAverageSoldPrice] = useState<number | null>(null);
-
-  // NEW: Function to fetch and filter sold properties
-  const fetchSoldProperties = async (suburb: string | null, filter: string) => {
-    if (!suburb) {
-      setSoldProperties([]);
-      setAverageSoldPrice(null);
-      return;
-    }
-
-    try {
-      let query = supabase
-        .from('properties')
-        .select('id, address, sold_price, sold_date, suburb')
-        .eq('suburb', suburb)
-        .eq('status', 'sold'); // Ensure only sold properties are fetched
-
-      // Apply time filter
-      const now = new Date();
-      let startDate: Date;
-      switch (filter) {
-        case '30_days':
-          startDate = new Date(now.setDate(now.getDate() - 30));
-          break;
-        case '2_months':
-          startDate = new Date(now.setMonth(now.getMonth() - 2));
-          break;
-        case '3_months':
-          startDate = new Date(now.setMonth(now.getMonth() - 3));
-          break;
-        case '4_months':
-          startDate = new Date(now.setMonth(now.getMonth() - 4));
-          break;
-        case '6_months':
-          startDate = new Date(now.setMonth(now.getMonth() - 6));
-          break;
-        default:
-          startDate = new Date(0); // No filter, get all sold properties
-      }
-
-      if (filter !== 'all') {
-        query = query.gte('sold_date', startDate.toISOString());
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        throw new Error(`Failed to fetch sold properties: ${error.message}`);
-      }
-
-      const properties = (data || []) as SoldProperty[];
-      setSoldProperties(properties);
-
-      // Calculate average sold price
-      if (properties.length > 0) {
-        const totalPrice = properties.reduce((sum, prop) => sum + (prop.sold_price || 0), 0);
-        setAverageSoldPrice(totalPrice / properties.length);
-      } else {
-        setAverageSoldPrice(null);
-      }
-    } catch (error: any) {
-      console.error('Error fetching sold properties:', error);
-      setSoldProperties([]);
-      setAverageSoldPrice(null);
-    }
-  };
+  const [soldPropertiesFilter, setSoldPropertiesFilter] = useState<string>('30_days');
 
   useEffect(() => {
     const initializeAgent = async () => {
-      console.log('MarketingPlanPage useEffect:', { user, profile });
-
       if (!user) {
-        console.log('No user, redirecting to /agent-login');
         setLoading(false);
         navigate('/agent-login');
         return;
       }
 
       if (!profile) {
-        console.log('Profile not loaded yet, waiting...');
         return;
       }
 
       if (profile.role === 'agent' || profile.role === 'admin') {
-        console.log(`Valid role detected: ${profile.role}, proceeding with initialization`);
         try {
           let { data: agentData, error: agentError } = await supabase
             .from('agents')
@@ -228,28 +143,20 @@ export function MarketingPlanPage() {
             .single();
 
           if (agentError && agentError.code !== 'PGRST116') {
-            console.error('Error fetching agent:', agentError);
             throw agentError;
           }
 
           if (!agentData) {
-            console.log('No agent record found, creating one');
             const { error: insertAgentError } = await supabase
               .from('agents')
               .insert({ id: user.id, name: profile.name || user.email || 'Unknown Agent' });
-            if (insertAgentError) {
-              console.error('Error inserting agent:', insertAgentError);
-              throw insertAgentError;
-            }
+            if (insertAgentError) throw insertAgentError;
             const { data: newAgentData, error: newAgentError } = await supabase
               .from('agents')
               .select('id, name')
               .eq('id', user.id)
               .single();
-            if (newAgentError) {
-              console.error('Error fetching new agent:', newAgentError);
-              throw newAgentError;
-            }
+            if (newAgentError) throw newAgentError;
             agentData = newAgentData;
           }
 
@@ -261,13 +168,11 @@ export function MarketingPlanPage() {
           await loadMarketingPlan(user.id);
           await loadSavedPlans(user.id);
         } catch (error) {
-          console.error('Error initializing agent:', error);
           setSaveError('Failed to initialize agent data');
         } finally {
           setLoading(false);
         }
       } else {
-        console.log(`Invalid role: ${profile.role}, redirecting to /agent-login`);
         setLoading(false);
         navigate('/agent-login');
       }
@@ -275,13 +180,6 @@ export function MarketingPlanPage() {
 
     initializeAgent();
   }, [user, profile, navigate]);
-
-  // NEW: Effect to fetch sold properties when suburb or filter changes
-  useEffect(() => {
-    if (marketingPlan.suburb) {
-      fetchSoldProperties(marketingPlan.suburb, planSoldPropertiesFilter);
-    }
-  }, [marketingPlan.suburb, planSoldPropertiesFilter]);
 
   useEffect(() => {
     if (user?.id) {
@@ -521,32 +419,20 @@ export function MarketingPlanPage() {
       if (!street.name)
         newErrors[`door_knock_street_${index}_name`] = `Please enter a street name for door knock ${index + 1}`;
       if (!street.target_knocks || parseInt(street.target_knocks) <= 0)
-        newErrors[`door_knock_street_${index}_target_knocks`] = `Please enter a valid number of target knocks for door knock ${
-          index + 1
-        }`;
+        newErrors[`door_knock_street_${index}_target_knocks`] = `Please enter a valid number of target knocks for door knock ${index + 1}`;
       if (!street.target_made || parseInt(street.target_made) <= 0)
-        newErrors[`door_knock_street_${index}_target_made`] = `Please enter a valid number of target knocks made for door knock ${
-          index + 1
-        }`;
+        newErrors[`door_knock_street_${index}_target_made`] = `Please enter a valid number of target knocks made for door knock ${index + 1}`;
       if (!street.target_answers || parseInt(street.target_answers) <= 0)
-        newErrors[`door_knock_street_${index}_target_answers`] = `Please enter a valid number of target answers for door knock ${
-          index + 1
-        }`;
+        newErrors[`door_knock_street_${index}_target_answers`] = `Please enter a valid number of target answers for door knock ${index + 1}`;
       if (!street.target_connects || parseInt(street.target_connects) <= 0)
-        newErrors[`door_knock_street_${index}_target_connects`] = `Please enter a valid number of target connects for door knock ${
-          index + 1
-        }`;
+        newErrors[`door_knock_street_${index}_target_connects`] = `Please enter a valid number of target connects for door knock ${index + 1}`;
     });
     marketingPlan.phone_call_streets.forEach((street, index) => {
       if (!street.name) newErrors[`phone_call_street_${index}_name`] = `Please enter a street name for phone call ${index + 1}`;
       if (!street.target_calls || parseInt(street.target_calls) <= 0)
-        newErrors[`phone_call_street_${index}_target_calls`] = `Please enter a valid number of target calls for phone call ${
-          index + 1
-        }`;
+        newErrors[`phone_call_street_${index}_target_calls`] = `Please enter a valid number of target calls for phone call ${index + 1}`;
       if (!street.target_connects || parseInt(street.target_connects) <= 0)
-        newErrors[`phone_call_street_${index}_target_connects`] = `Please enter a valid number of target connects for phone call ${
-          index + 1
-        }`;
+        newErrors[`phone_call_street_${index}_target_connects`] = `Please enter a valid number of target connects for phone call ${index + 1}`;
     });
 
     setErrors(newErrors);
@@ -651,8 +537,6 @@ export function MarketingPlanPage() {
     setErrors({});
     setSelectedActivity('all');
     setSoldPropertiesFilter('30_days');
-    // NEW: Reset plan-specific filter
-    setPlanSoldPropertiesFilter('30_days');
     setSaveError(null);
     setSaveSuccess(false);
     setActualProgress({
@@ -721,46 +605,6 @@ export function MarketingPlanPage() {
     }
   };
 
-  const handleSelectStreet = (street: { name: string; why: string }, type: 'door_knock' | 'phone_call') => {
-    if (type === 'door_knock') {
-      setMarketingPlan({
-        ...marketingPlan,
-        door_knock_streets: [
-          ...marketingPlan.door_knock_streets,
-          {
-            id: uuidv4(),
-            name: street.name,
-            why: street.why,
-            house_count: '',
-            target_knocks: '50',
-            target_made: '50',
-            target_answers: '20',
-            target_connects: '10',
-            desktop_appraisals: '5',
-            face_to_face_appraisals: '2',
-          },
-        ],
-      });
-    } else {
-      setMarketingPlan({
-        ...marketingPlan,
-        phone_call_streets: [
-          ...marketingPlan.phone_call_streets,
-          {
-            id: uuidv4(),
-            name: street.name,
-            why: street.why,
-            target_calls: '30',
-            target_connects: '10',
-            desktop_appraisals: '3',
-            face_to_face_appraisals: '1',
-          },
-        ],
-      });
-    }
-    setSelectedActivity(type);
-  };
-
   const removeStreet = (type: 'door_knock' | 'phone_call', id: string) => {
     if (type === 'door_knock') {
       setMarketingPlan({
@@ -775,23 +619,42 @@ export function MarketingPlanPage() {
     }
   };
 
-  const updateStreet = (
-    type: 'door_knock' | 'phone_call',
-    id: string,
-    field: keyof DoorKnockStreet | keyof PhoneCallStreet,
-    value: string
-  ) => {
-    const newValue = field === 'name' || field === 'why' ? toTitleCase(value) : value;
+  const handleSelectStreet = (street: { name: string; why: string }, type: 'door_knock' | 'phone_call') => {
     if (type === 'door_knock') {
-      const newStreets = marketingPlan.door_knock_streets.map((street) =>
-        street.id === id ? { ...street, [field]: newValue } : street
-      );
-      setMarketingPlan({ ...marketingPlan, door_knock_streets: newStreets });
+      setMarketingPlan({
+        ...marketingPlan,
+        door_knock_streets: [
+          ...marketingPlan.door_knock_streets,
+          {
+            id: uuidv4(),
+            name: street.name,
+            why: street.why,
+            house_count: '',
+            target_knocks: '',
+            target_made: '',
+            target_answers: '',
+            target_connects: '',
+            desktop_appraisals: '',
+            face_to_face_appraisals: '',
+          },
+        ],
+      });
     } else {
-      const newStreets = marketingPlan.phone_call_streets.map((street) =>
-        street.id === id ? { ...street, [field]: newValue } : street
-      );
-      setMarketingPlan({ ...marketingPlan, phone_call_streets: newStreets });
+      setMarketingPlan({
+        ...marketingPlan,
+        phone_call_streets: [
+          ...marketingPlan.phone_call_streets,
+          {
+            id: uuidv4(),
+            name: street.name,
+            why: street.why,
+            target_calls: '',
+            target_connects: '',
+            desktop_appraisals: '',
+            face_to_face_appraisals: '',
+          },
+        ],
+      });
     }
   };
 
@@ -1113,72 +976,10 @@ export function MarketingPlanPage() {
               )}
             </div>
 
-            {/* NEW: Sold Properties Filter Section */}
-            <motion.div
-              className="bg-gray-50 p-6 rounded-lg shadow-sm"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.6 }}
-            >
-              <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                <svg
-                  className="w-5 h-5 mr-2 text-indigo-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
-                  />
-                </svg>
-                Sold Properties
-              </h2>
-              <div className="mb-4">
-                <label className="block text-gray-800 font-semibold mb-2">Filter Sold Properties</label>
-                <select
-                  value={planSoldPropertiesFilter}
-                  onChange={(e) => setPlanSoldPropertiesFilter(e.target.value)}
-                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
-                  aria-label="Select sold properties filter"
-                >
-                  <option value="all">All Time</option>
-                  <option value="30_days">Last 30 Days</option>
-                  <option value="2_months">Last 2 Months</option>
-                  <option value="3_months">Last 3 Months</option>
-                  <option value="4_months">Last 4 Months</option>
-                  <option value="6_months">Last 6 Months</option>
-                </select>
-              </div>
-              {soldProperties.length > 0 ? (
-                <div>
-                  <p className="text-gray-700 font-medium mb-2">
-                    Total Sold Properties: {soldProperties.length}
-                  </p>
-                  <p className="text-gray-700 font-medium mb-4">
-                    Average Sold Price: {averageSoldPrice ? `$${averageSoldPrice.toLocaleString()}` : 'N/A'}
-                  </p>
-                  <div className="grid grid-cols-1 gap-4">
-                    {soldProperties.map((property) => (
-                      <div key={property.id} className="border p-4 rounded-lg bg-white shadow-sm">
-                        <p><strong>Address:</strong> {property.address}</p>
-                        <p><strong>Sold Price:</strong> ${property.sold_price.toLocaleString()}</p>
-                        <p><strong>Sold Date:</strong> {new Date(property.sold_date).toLocaleDateString()}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-gray-600">No sold properties found for the selected suburb and filter.</p>
-              )}
-            </motion.div>
-
             <StreetSuggestions
               suburb={marketingPlan.suburb || null}
               soldPropertiesFilter={soldPropertiesFilter}
-              onSelectStreet={(street, type) => handleSelectStreet(street, type)}
+              onSelectStreet={handleSelectStreet}
             />
 
             <motion.div
@@ -1190,7 +991,6 @@ export function MarketingPlanPage() {
               <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                 <svg
                   className="w-5 h-5 mr-2 text-indigo-600"
-                  data-testid="progress-icon"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -1305,7 +1105,8 @@ export function MarketingPlanPage() {
                           width: `${
                             actualProgress.doorKnockConnects.target
                               ? Math.min(
-                                  (actualProgress.doorKnockConnects.completed / actualProgress.doorKnockConnects.target) *
+                                  (actualProgress.doorKnockConnects.completed /
+                                    actualProgress.doorKnockConnects.target) *
                                     100,
                                   100
                                 )
