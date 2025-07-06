@@ -11,7 +11,7 @@ import { CreateAgentModal } from './components/CreateAgentModal';
 import { AgentLogin } from './pages/AgentLogin';
 import { AgentDashboard } from './pages/AgentDashboard';
 import { Reports } from './pages/Reports';
-import { AgentReports } from './pages/AgentReports';
+import {AgentReports}  from './pages/AgentReports';
 import { AgentRegister } from './pages/AgentRegister';
 import { useAuthStore } from './store/authStore';
 import { PropertyPrediction } from './pages/PropertyPrediction';

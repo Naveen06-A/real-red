@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UserPlus, Home, FileText, Activity, BarChart } from 'lucide-react';
+import { UserPlus, Home, FileText, Activity, BarChart ,Link as LinkIcon, ExternalLink} from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { v4 as uuidv4 } from 'uuid';
 import { CreateAgentModal } from './AgentManagement';
@@ -41,6 +41,22 @@ export function AdminDashboard() {
     { name: 'Progress Report', path: '/progress-report-page', icon: BarChart },
     { name: 'Reports', path: '/reports', icon: FileText },
     { name: 'Agent Report', path: '/agent-reports', icon: FileText },
+    {name: 'Admin Commission', path: '/admin-commission', icon: FileText},
+    
+  
+    {
+    name: 'Agent Report',
+    path: '/agent-reports',
+    icon: FileText,
+    action: () => {
+      if (agents.length > 0) {
+        // Navigate with the first agent's ID or prompt for selection
+        navigate(`/agent-reports?agent_id=${agents[0].id}`);
+      } else {
+        toast.error('No agents available. Please create an agent first.');
+      }
+    },
+  },
   ];
 
   const fetchAgents = async () => {

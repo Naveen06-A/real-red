@@ -9,13 +9,13 @@ import { formatCurrency } from '../utils/formatters';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { utils, writeFile } from 'xlsx';
-import { Bar, Line, Pie } from 'react-chartjs-2';
-import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend, LineElement, PointElement, PieController, ArcElement } from 'chart.js';
+import { Bar, Doughnut } from 'react-chartjs-2';
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement } from 'chart.js';
 
-// Register Chart.js components (updated to include Line and Pie elements)
-ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, LineElement, PointElement, PieController, ArcElement);
+// Register Chart.js components
+ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, ArcElement);
 
-// Interfaces (unchanged)
+// Interfaces
 interface PropertyDetails {
   id: string;
   agency_name: string | null;
@@ -57,11 +57,11 @@ interface SimulatorState {
   selectedAgency: string | null;
 }
 
-// Helper Functions (unchanged)
+// Helper Functions
 const normalizeAgencyName = (agency: string | null): string => agency?.trim().toLowerCase() || 'Unknown';
 const normalizeAgentName = (agent: string | null): string => agent?.trim() || 'Unknown';
 
-// Collapsible Section Component (unchanged)
+// Collapsible Section Component
 const CollapsibleSection: React.FC<{
   title: string;
   children: React.ReactNode;
@@ -124,11 +124,13 @@ const AdminCommissionByAgency = () => {
   });
   const [previewImpact, setPreviewImpact] = useState<{ oldTotal: number; newTotal: number } | null>(null);
   const [selectedAgency, setSelectedAgency] = useState<string | null>(null);
+  const [chartPage, setChartPage] = useState(1);
   const itemsPerPage = 10;
+  const chartItemsPerPage = 5;
   const { user, profile } = useAuthStore();
   const navigate = useNavigate();
 
-  // Debug user and profile state (unchanged)
+  // Debug user and profile state
   useEffect(() => {
     console.log('User object:', user);
     console.log('Profile object:', profile);
@@ -142,7 +144,7 @@ const AdminCommissionByAgency = () => {
 
   const isAdmin = profile?.role === 'admin';
 
-  // Fetch data (unchanged)
+  // Fetch data
   useEffect(() => {
     if (!isAdmin) return;
     const fetchData = async () => {
@@ -171,7 +173,7 @@ const AdminCommissionByAgency = () => {
     fetchData();
   }, [isAdmin]);
 
-  // Calculate top earners (unchanged)
+  // Calculate top earners
   const topEarners = useMemo(() => {
     const agencyCommissions: { [key: string]: number } = {};
     const agentCommissionsMap: { [key: string]: number } = {};
@@ -200,7 +202,7 @@ const AdminCommissionByAgency = () => {
     return { topAgency, topAgent };
   }, [properties, agentCommissions]);
 
-  // Calculate commission impact (unchanged)
+  // Calculate commission impact
   const calculateImpact = useCallback(
     (propertyIds: string[], newCommission: number) => {
       let oldTotal = 0;
@@ -218,168 +220,37 @@ const AdminCommissionByAgency = () => {
     [properties, agentCommissions]
   );
 
-  // Agency commission chart data
-  const agencyChartData = useMemo(() => ({
-    labels: [...new Set(properties.map(p => normalizeAgencyName(p.agency_name)))],
-    datasets: [{
-      label: 'Total Commission by Agency',
-      data: [...new Set(properties.map(p => normalizeAgencyName(p.agency_name)))].map(agency =>
-        properties
-          .filter(p => normalizeAgencyName(p.agency_name) === agency)
-          .reduce((sum, p) => {
-            const price = p.sold_price || p.price || 0;
-            const commission = agentCommissions.find(ac => ac.property_id === p.id)?.commission_rate || p.commission || 0;
-            return sum + (price * (commission / 100));
-          }, 0)
-      ),
-      backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'],
-      borderColor: ['#1E3A8A', '#065F46', '#B45309', '#991B1B', '#5B21B6'],
-      borderWidth: 1,
-      hoverBackgroundColor: ['#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED'],
-    }],
-  }), [properties, agentCommissions]);
-
-  // Agent commission chart data (for drill-down)
-  const agentChartData = useMemo(() => {
-    if (!selectedAgency) return null;
-    const agents = [...new Set(
-      properties
-        .filter(p => normalizeAgencyName(p.agency_name) === selectedAgency)
-        .map(p => normalizeAgentName(p.agent_name))
-    )];
-    return {
-      labels: agents,
-      datasets: [{
-        label: `Commissions for ${selectedAgency}`,
-        data: agents.map(agent =>
-          properties
-            .filter(p => normalizeAgencyName(p.agency_name) === selectedAgency && normalizeAgentName(p.agent_name) === agent)
-            .reduce((sum, p) => {
-              const price = p.sold_price || p.price || 0;
-              const commission = agentCommissions.find(ac => ac.property_id === p.id)?.commission_rate || p.commission || 0;
-              return sum + (price * (commission / 100));
-            }, 0)
-        ),
-        backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'],
-        borderColor: ['#1E3A8A', '#065F46', '#B45309', '#991B1B', '#5B21B6'],
-        borderWidth: 1,
-        hoverBackgroundColor: ['#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED'],
-      }],
-    };
-  }, [properties, agentCommissions, selectedAgency]);
-
-  // Pie chart for commission proportions
-  const pieChartData = {
-    type: 'pie',
-    data: {
-      labels: [...new Set(properties.map(p => normalizeAgencyName(p.agency_name)))],
-      datasets: [{
-        label: 'Commission Share by Agency',
-        data: [...new Set(properties.map(p => normalizeAgencyName(p.agency_name)))].map(agency =>
-          properties
-            .filter(p => normalizeAgencyName(p.agency_name) === agency)
-            .reduce((sum, p) => {
-              const price = p.sold_price || p.price || 0;
-              const commission = agentCommissions.find(ac => ac.property_id === p.id)?.commission_rate || p.commission || 0;
-              return sum + (price * (commission / 100));
-            }, 0)
-        ),
-        backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'],
-        borderColor: ['#1E3A8A', '#065F46', '#B45309', '#991B1B', '#5B21B6'],
-        borderWidth: 1,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { font: { size: 12 } } },
-        title: {
-          display: true,
-          text: 'Commission Share by Agency',
-          font: { size: 18, weight: 'bold' },
-          padding: { top: 10, bottom: 20 },
-        },
-        tooltip: {
-          backgroundColor: '#1f2937',
-          titleFont: { size: 14 },
-          bodyFont: { size: 12 },
-          padding: 10,
-        },
-      },
-    },
-  };
-
-  // Trend chart data (monthly commissions over last 12 months)
-  const trendChartData = useMemo(() => {
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const date = new Date();
-      date.setMonth(date.getMonth() - (11 - i));
-      return date.toLocaleString('default', { month: 'short', year: 'numeric' });
+  // Calculate commission data for listed and sold properties
+  const commissionData = useMemo(() => {
+    const agencyMap: { [key: string]: { listed: number; sold: number } } = {};
+    properties.forEach(p => {
+      const agency = normalizeAgencyName(p.agency_name);
+      const price = p.sold_price || p.price || 0; // Use sold_price if available, otherwise price
+      const commissionRate = agentCommissions.find(ac => ac.property_id === p.id)?.commission_rate || p.commission || 0;
+      const commission = price * (commissionRate / 100);
+      if (!agencyMap[agency]) agencyMap[agency] = { listed: 0, sold: 0 };
+      if (p.contract_status === 'sold') agencyMap[agency].sold += commission;
+      else agencyMap[agency].listed += commission; // Listed includes all non-sold statuses
     });
-    const dataByAgency = [...new Set(properties.map(p => normalizeAgencyName(p.agency_name)))].map(agency => ({
-      label: agency,
-      data: months.map(month => {
-        const [monthName, year] = month.split(' ');
-        return properties
-          .filter(p => {
-            const soldDate = p.sold_date ? new Date(p.sold_date) : null;
-            return (
-              normalizeAgencyName(p.agency_name) === agency &&
-              soldDate &&
-              soldDate.toLocaleString('default', { month: 'short' }) === monthName &&
-              soldDate.getFullYear().toString() === year
-            );
-          })
-          .reduce((sum, p) => {
-            const price = p.sold_price || p.price || 0;
-            const commission = agentCommissions.find(ac => ac.property_id === p.id)?.commission_rate || p.commission || 0;
-            return sum + (price * (commission / 100));
-          }, 0);
-      }),
-      borderColor: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'][
-        [...new Set(properties.map(p => normalizeAgencyName(p.agency_name)))].indexOf(agency) % 5
-      ],
-      fill: false,
-    }));
-    return {
-      type: 'line',
-      data: {
-        labels: months,
-        datasets: dataByAgency,
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: { display: true, text: 'Commission ($)', font: { size: 14 } },
-            grid: { color: '#e5e7eb' },
-          },
-          x: {
-            title: { display: true, text: 'Month', font: { size: 14 } },
-            grid: { display: false },
-          },
-        },
-        plugins: {
-          legend: { position: 'top' },
-          title: {
-            display: true,
-            text: 'Commission Trends Over Time',
-            font: { size: 18, weight: 'bold' },
-            padding: { top: 10, bottom: 20 },
-          },
-          tooltip: {
-            backgroundColor: '#1f2937',
-            titleFont: { size: 14 },
-            bodyFont: { size: 12 },
-            padding: 10,
-          },
-        },
-      },
-    };
+    return Object.entries(agencyMap).map(([agency, data]) => ({ agency, ...data }));
   }, [properties, agentCommissions]);
+
+  // Paginate commission data
+  const paginatedCommissionData = useMemo(() => {
+    const start = (chartPage - 1) * chartItemsPerPage;
+    const end = start + chartItemsPerPage;
+    return commissionData.slice(start, end);
+  }, [commissionData, chartPage]);
+
+  const totalChartPages = Math.ceil(commissionData.length / chartItemsPerPage);
+
+  // Property count
+  const propertyCount = useMemo(() => {
+    const total = properties.length;
+    const listed = properties.filter(p => p.contract_status !== 'sold' && p.contract_status !== null).length;
+    const sold = properties.filter(p => p.contract_status === 'sold').length;
+    return { total, listed, sold };
+  }, [properties]);
 
   // Simulator chart data
   const simulatorChartData = useMemo(() => {
@@ -404,9 +275,10 @@ const AdminCommissionByAgency = () => {
         datasets: [{
           label: `Commission for ${simulator.selectedAgency}`,
           data: [currentTotal, simulatedTotal],
-          backgroundColor: ['#3B82F6', '#10B981'],
+          backgroundColor: ['rgba(59, 130, 246, 0.7)', 'rgba(16, 185, 129, 0.7)'],
           borderColor: ['#1E3A8A', '#065F46'],
           borderWidth: 1,
+          barThickness: 40,
         }],
       },
       options: {
@@ -415,8 +287,20 @@ const AdminCommissionByAgency = () => {
         scales: {
           y: {
             beginAtZero: true,
-            title: { display: true, text: 'Commission ($)', font: { size: 14 } },
-            grid: { color: '#e5e7eb' },
+            title: { display: true, text: 'Commission ($)', font: { size: 14, family: 'Arial' } },
+            grid: { color: 'rgba(229, 231, 235, 0.5)' },
+            ticks: {
+              font: { size: 12, family: 'Arial' },
+              padding: 10,
+              callback: (value: number) => formatCurrency(value),
+            },
+          },
+          x: {
+            title: { display: true, text: 'Type', font: { size: 14, family: 'Arial' } },
+            grid: { display: false },
+            ticks: {
+              font: { size: 12, family: 'Arial' },
+            },
           },
         },
         plugins: {
@@ -424,21 +308,26 @@ const AdminCommissionByAgency = () => {
           title: {
             display: true,
             text: `Commission Simulation for ${simulator.selectedAgency}`,
-            font: { size: 18, weight: 'bold' },
-            padding: { top: 10, bottom: 20 },
+            font: { size: 18, weight: 'bold', family: 'Arial' },
+            padding: { top: 15, bottom: 25 },
+            color: '#1F2937',
           },
           tooltip: {
-            backgroundColor: '#1f2937',
-            titleFont: { size: 14 },
-            bodyFont: { size: 12 },
-            padding: 10,
+            backgroundColor: 'rgba(31, 41, 55, 0.9)',
+            titleFont: { size: 16, family: 'Arial' },
+            bodyFont: { size: 14, family: 'Arial' },
+            padding: 12,
+            cornerRadius: 8,
           },
+        },
+        layout: {
+          padding: 20,
         },
       },
     };
   }, [simulator, properties, agentCommissions]);
 
-  // Update single property commission (unchanged)
+  // Update single property commission
   const updateCommission = useCallback(async () => {
     if (!commissionEdit.propertyId || !isAdmin) return;
     const commissionValue = commissionEdit.newCommission;
@@ -494,7 +383,7 @@ const AdminCommissionByAgency = () => {
     }
   }, [commissionEdit, isAdmin, properties, agentCommissions]);
 
-  // Batch update commissions (unchanged)
+  // Batch update commissions
   const batchUpdateCommissions = useCallback(async () => {
     if (!batchEdit.selectedProperties.length || !isAdmin) return;
     const commissionValue = batchEdit.newCommission;
@@ -547,10 +436,13 @@ const AdminCommissionByAgency = () => {
     }
   }, [batchEdit, isAdmin, properties, agentCommissions]);
 
-  // Export CSV (unchanged)
+  // Export CSV
   const exportCSV = () => {
     const data = [
       ['Admin Commission Report', 'Generated on: ' + new Date().toLocaleString()],
+      ['Total Properties', propertyCount.total],
+      ['Listed Properties', propertyCount.listed],
+      ['Sold Properties', propertyCount.sold],
       ['Top Agency', `${topEarners.topAgency.name} (${formatCurrency(topEarners.topAgency.total)})`],
       ['Top Agent', `${topEarners.topAgent.name} (${formatCurrency(topEarners.topAgent.total)})`],
       [],
@@ -572,15 +464,18 @@ const AdminCommissionByAgency = () => {
     toast.success('Commission report exported as CSV');
   };
 
-  // Export PDF (unchanged)
+  // Export PDF
   const exportPDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text('Admin Commission Report', 20, 10);
     doc.setFontSize(12);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 20, 20);
-    doc.text(`Top Agency: ${topEarners.topAgency.name} (${formatCurrency(topEarners.topAgency.total)})`, 20, 30);
-    doc.text(`Top Agent: ${topEarners.topAgent.name} (${formatCurrency(topEarners.topAgent.total)})`, 20, 40);
+    doc.text(`Total Properties: ${propertyCount.total}`, 20, 30);
+    doc.text(`Listed Properties: ${propertyCount.listed}`, 20, 40);
+    doc.text(`Sold Properties: ${propertyCount.sold}`, 20, 50);
+    doc.text(`Top Agency: ${topEarners.topAgency.name} (${formatCurrency(topEarners.topAgency.total)})`, 20, 60);
+    doc.text(`Top Agent: ${topEarners.topAgent.name} (${formatCurrency(topEarners.topAgent.total)})`, 20, 70);
     autoTable(doc, {
       head: [['Property ID', 'Address', 'Agency', 'Agent', 'Commission Rate', 'Price', 'Status']],
       body: properties.map(p => [
@@ -592,7 +487,7 @@ const AdminCommissionByAgency = () => {
         formatCurrency(p.sold_price || p.price || 0),
         p.contract_status || 'Unknown',
       ]),
-      startY: 50,
+      startY: 80,
       styles: { fontSize: 10, cellPadding: 3 },
       headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255] },
     });
@@ -600,7 +495,7 @@ const AdminCommissionByAgency = () => {
     toast.success('Commission report exported as PDF');
   };
 
-  // Filter and paginate properties (unchanged)
+  // Filter and paginate properties
   const filteredProperties = useMemo(() => {
     return properties.filter(
       p =>
@@ -612,6 +507,15 @@ const AdminCommissionByAgency = () => {
 
   const paginatedProperties = filteredProperties.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   const totalPages = Math.ceil(filteredProperties.length / itemsPerPage);
+
+  // Pagination range (show max 5 pages at a time)
+  const getPaginationRange = () => {
+    const maxPagesToShow = 5;
+    const startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+    const endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+    const adjustedStartPage = Math.max(1, endPage - maxPagesToShow + 1);
+    return Array.from({ length: endPage - adjustedStartPage + 1 }, (_, i) => adjustedStartPage + i);
+  };
 
   if (!isAdmin) {
     return (
@@ -863,25 +767,24 @@ const AdminCommissionByAgency = () => {
             </table>
           </div>
           {totalPages > 1 && (
-            <div className="mt-6 flex justify-center space-x-2">
+            <div className="mt-6 flex justify-center items-center space-x-2">
               <motion.button
-                onClick={() => setCurrentPage(p => p - 1)}
+                onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
-                className={`px-4 py-2 rounded-full flex items-center text-sm shadow-md ${
-                  currentPage === 1 ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white'
+                className={`px-4 py-2 rounded-full text-sm font-medium shadow-md ${
+                  currentPage === 1 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
                 whileHover={{ scale: currentPage === 1 ? 1 : 1.05 }}
                 whileTap={{ scale: currentPage === 1 ? 1 : 0.95 }}
               >
-                <ChevronLeft className="w-4 h-4 mr-2" />
-                Previous
+                Prev
               </motion.button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+              {Array.from({ length: totalPages }, (_, i) => i + 1).slice(Math.max(0, currentPage - 3), Math.min(totalPages, currentPage + 2)).map(page => (
                 <motion.button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-4 py-2 rounded-full text-sm shadow-md ${
-                    currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'
+                  className={`px-4 py-2 rounded-full text-sm font-medium shadow-md ${
+                    currentPage === page ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -890,16 +793,15 @@ const AdminCommissionByAgency = () => {
                 </motion.button>
               ))}
               <motion.button
-                onClick={() => setCurrentPage(p => p + 1)}
+                onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                className={`px-4 py-2 rounded-full flex items-center text-sm shadow-md ${
-                  currentPage === totalPages ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white'
+                className={`px-4 py-2 rounded-full text-sm font-medium shadow-md ${
+                  currentPage === totalPages ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
                 whileHover={{ scale: currentPage === totalPages ? 1 : 1.05 }}
                 whileTap={{ scale: currentPage === totalPages ? 1 : 0.95 }}
               >
                 Next
-                <ChevronRight className="w-4 h-4 ml-2" />
               </motion.button>
             </div>
           )}
@@ -911,118 +813,104 @@ const AdminCommissionByAgency = () => {
           isOpen={true}
           toggleOpen={() => {}}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-2xl shadow-xl">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Total Commissions by Agency</h3>
-              {properties.length > 0 ? (
-                <div className="h-80">
-                  <Bar
-                    data={agencyChartData}
-                    options={{
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      scales: {
-                        y: {
-                          beginAtZero: true,
-                          title: { display: true, text: 'Total Commission ($)', font: { size: 14 } },
-                          grid: { color: '#e5e7eb' },
-                        },
-                        x: {
-                          title: { display: true, text: 'Agency', font: { size: 14 } },
-                          grid: { display: false },
-                        },
-                      },
-                      plugins: {
-                        legend: { display: false },
-                        title: {
-                          display: true,
-                          text: 'Commission Distribution by Agency',
-                          font: { size: 18, weight: 'bold' },
-                          padding: { top: 10, bottom: 20 },
-                        },
-                        tooltip: {
-                          backgroundColor: '#1f2937',
-                          titleFont: { size: 14 },
-                          bodyFont: { size: 12 },
-                          padding: 10,
-                        },
-                      },
-                      onClick: (event, elements) => {
-                        if (elements.length > 0) {
-                          const agency = agencyChartData.labels[elements[0].index];
-                          setSelectedAgency(agency);
-                        }
-                      },
-                    }}
-                  />
+          <div className="space-y-8">
+            {/* Property Count Summary */}
+            <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Property Statistics</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="p-4 bg-blue-50 rounded-lg shadow-sm">
+                  <p className="text-sm font-medium text-gray-600">Total Properties</p>
+                  <p className="text-2xl font-bold text-blue-600">{propertyCount.total}</p>
+                  <p className="text-xs text-gray-500 mt-1">All properties in the system</p>
                 </div>
-              ) : (
-                <p className="text-center text-gray-600 text-lg">No data available for chart.</p>
-              )}
-            </div>
-            {selectedAgency && agentChartData && (
-              <div className="bg-white p-6 rounded-2xl shadow-xl">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Agent Commissions for {selectedAgency}</h3>
-                <div className="h-80">
-                  <Bar data={agentChartData} options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                      y: {
-                        beginAtZero: true,
-                        title: { display: true, text: 'Commission ($)', font: { size: 14 } },
-                        grid: { color: '#e5e7eb' },
-                      },
-                      x: {
-                        title: { display: true, text: 'Agent', font: { size: 14 } },
-                        grid: { display: false },
-                      },
-                    },
-                    plugins: {
-                      legend: { display: false },
-                      title: {
-                        display: true,
-                        text: `Agent Commission Breakdown`,
-                        font: { size: 18, weight: 'bold' },
-                        padding: { top: 10, bottom: 20 },
-                      },
-                      tooltip: {
-                        backgroundColor: '#1f2937',
-                        titleFont: { size: 14 },
-                        bodyFont: { size: 12 },
-                        padding: 10,
-                      },
-                    },
-                  }} />
+                <div className="p-4 bg-green-50 rounded-lg shadow-sm">
+                  <p className="text-sm font-medium text-gray-600">Listed Properties</p>
+                  <p className="text-2xl font-bold text-green-600">{propertyCount.listed}</p>
+                  <p className="text-xs text-gray-500 mt-1">Properties not yet sold</p>
                 </div>
-                <motion.button
-                  onClick={() => setSelectedAgency(null)}
-                  className="mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded-full flex items-center mx-auto"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  Back to Agency View
-                </motion.button>
+                <div className="p-4 bg-purple-50 rounded-lg shadow-sm">
+                  <p className="text-sm font-medium text-gray-600">Sold Properties</p>
+                  <p className="text-2xl font-bold text-purple-600">{propertyCount.sold}</p>
+                  <p className="text-xs text-gray-500 mt-1">Properties marked as sold</p>
+                </div>
               </div>
-            )}
-            <div className="bg-white p-6 rounded-2xl shadow-xl">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Commission Share by Agency</h3>
-              {properties.length > 0 ? (
-                <div className="h-80">
-                  <Pie data={pieChartData.data} options={pieChartData.options} />
-                </div>
-              ) : (
-                <p className="text-center text-gray-600 text-lg">No data available for chart.</p>
-              )}
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow-xl">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Commission Trends Over Time</h3>
-              {properties.length > 0 ? (
-                <div className="h-80">
-                  <Line data={trendChartData.data} options={trendChartData.options} />
+
+            <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Commissions by Agency (Listed vs Sold)</h3>
+              {commissionData.length > 0 ? (
+                <div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agency</th>
+                          <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Listed Commission ($)</th>
+                          <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Sold Commission ($)</th>
+                          <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Commission ($)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {paginatedCommissionData.map((data, index) => (
+                          <motion.tr
+                            key={data.agency}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            transition={{ duration: 0.2, delay: index * 0.05 }}
+                            className="hover:bg-blue-50 transition-colors duration-200"
+                          >
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{data.agency}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">{formatCurrency(data.listed)}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">{formatCurrency(data.sold)}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">{formatCurrency(data.listed + data.sold)}</td>
+                          </motion.tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {totalChartPages > 1 && (
+                    <div className="mt-6 flex justify-center items-center space-x-2">
+                      <motion.button
+                        onClick={() => setChartPage(p => Math.max(p - 1, 1))}
+                        disabled={chartPage === 1}
+                        className={`px-4 py-2 rounded-full text-sm font-medium shadow-md ${
+                          chartPage === 1 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                        whileHover={{ scale: chartPage === 1 ? 1 : 1.05 }}
+                        whileTap={{ scale: chartPage === 1 ? 1 : 0.95 }}
+                      >
+                        Prev
+                      </motion.button>
+                      {Array.from({ length: totalChartPages }, (_, i) => i + 1).slice(Math.max(0, chartPage - 3), Math.min(totalChartPages, chartPage + 2)).map(page => (
+                        <motion.button
+                          key={page}
+                          onClick={() => setChartPage(page)}
+                          className={`px-4 py-2 rounded-full text-sm font-medium shadow-md ${
+                            chartPage === page ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          {page}
+                        </motion.button>
+                      ))}
+                      <motion.button
+                        onClick={() => setChartPage(p => Math.min(p + 1, totalChartPages))}
+                        disabled={chartPage === totalChartPages}
+                        className={`px-4 py-2 rounded-full text-sm font-medium shadow-md ${
+                          chartPage === totalChartPages ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
+                        whileHover={{ scale: chartPage === totalChartPages ? 1 : 1.05 }}
+                        whileTap={{ scale: chartPage === totalChartPages ? 1 : 0.95 }}
+                      >
+                        Next
+                      </motion.button>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <p className="text-center text-gray-600 text-lg">No data available for chart.</p>
+                <p className="text-center text-gray-600 text-lg">No data available for commission distribution.</p>
               )}
             </div>
           </div>

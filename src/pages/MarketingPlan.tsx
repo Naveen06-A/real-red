@@ -38,6 +38,7 @@ const PREDEFINED_SUBURBS = [
   'Spring Mountain QLD 4300',
   'Springfield QLD 4300',
 ];
+
 interface DoorKnockStreet {
   id: string;
   name: string;
@@ -86,6 +87,15 @@ interface ActualProgress {
   phoneCallFaceToFaceAppraisals: { completed: number; target: number };
 }
 
+// NEW: Interface for sold property data
+interface SoldProperty {
+  id: string;
+  address: string;
+  sold_price: number;
+  sold_date: string;
+  suburb: string;
+}
+
 export function MarketingPlanPage() {
   const { user, profile } = useAuthStore();
   const navigate = useNavigate();
@@ -119,13 +129,83 @@ export function MarketingPlanPage() {
   const [selectedActivity, setSelectedActivity] = useState<'all' | 'door_knock' | 'phone_call'>('all');
   const [showPlansModal, setShowPlansModal] = useState(false);
   const [savedPlans, setSavedPlans] = useState<MarketingPlan[]>([]);
+  const [soldPropertiesFilter, setSoldPropertiesFilter] = useState<string>('30_days'); // For StreetSuggestions
+  // NEW: State for plan-specific sold properties filter
+  const [planSoldPropertiesFilter, setPlanSoldPropertiesFilter] = useState<string>('30_days');
+  // NEW: State for sold properties data
+  const [soldProperties, setSoldProperties] = useState<SoldProperty[]>([]);
+  // NEW: State for average sold price
+  const [averageSoldPrice, setAverageSoldPrice] = useState<number | null>(null);
+
+  // NEW: Function to fetch and filter sold properties
+  const fetchSoldProperties = async (suburb: string | null, filter: string) => {
+    if (!suburb) {
+      setSoldProperties([]);
+      setAverageSoldPrice(null);
+      return;
+    }
+
+    try {
+      let query = supabase
+        .from('properties')
+        .select('id, address, sold_price, sold_date, suburb')
+        .eq('suburb', suburb)
+        .eq('status', 'sold'); // Ensure only sold properties are fetched
+
+      // Apply time filter
+      const now = new Date();
+      let startDate: Date;
+      switch (filter) {
+        case '30_days':
+          startDate = new Date(now.setDate(now.getDate() - 30));
+          break;
+        case '2_months':
+          startDate = new Date(now.setMonth(now.getMonth() - 2));
+          break;
+        case '3_months':
+          startDate = new Date(now.setMonth(now.getMonth() - 3));
+          break;
+        case '4_months':
+          startDate = new Date(now.setMonth(now.getMonth() - 4));
+          break;
+        case '6_months':
+          startDate = new Date(now.setMonth(now.getMonth() - 6));
+          break;
+        default:
+          startDate = new Date(0); // No filter, get all sold properties
+      }
+
+      if (filter !== 'all') {
+        query = query.gte('sold_date', startDate.toISOString());
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to fetch sold properties: ${error.message}`);
+      }
+
+      const properties = (data || []) as SoldProperty[];
+      setSoldProperties(properties);
+
+      // Calculate average sold price
+      if (properties.length > 0) {
+        const totalPrice = properties.reduce((sum, prop) => sum + (prop.sold_price || 0), 0);
+        setAverageSoldPrice(totalPrice / properties.length);
+      } else {
+        setAverageSoldPrice(null);
+      }
+    } catch (error: any) {
+      console.error('Error fetching sold properties:', error);
+      setSoldProperties([]);
+      setAverageSoldPrice(null);
+    }
+  };
 
   useEffect(() => {
     const initializeAgent = async () => {
-      // Debug logging to inspect user and profile
       console.log('MarketingPlanPage useEffect:', { user, profile });
 
-      // If user is not authenticated, redirect to login
       if (!user) {
         console.log('No user, redirecting to /agent-login');
         setLoading(false);
@@ -133,17 +213,14 @@ export function MarketingPlanPage() {
         return;
       }
 
-      // Wait for profile to load
       if (!profile) {
         console.log('Profile not loaded yet, waiting...');
         return;
       }
 
-      // Check for valid role (admin or agent)
       if (profile.role === 'agent' || profile.role === 'admin') {
         console.log(`Valid role detected: ${profile.role}, proceeding with initialization`);
         try {
-          // Fetch or create agent record
           let { data: agentData, error: agentError } = await supabase
             .from('agents')
             .select('id, name')
@@ -164,7 +241,6 @@ export function MarketingPlanPage() {
               console.error('Error inserting agent:', insertAgentError);
               throw insertAgentError;
             }
-            // Re-fetch agent data after insertion
             const { data: newAgentData, error: newAgentError } = await supabase
               .from('agents')
               .select('id, name')
@@ -199,6 +275,14 @@ export function MarketingPlanPage() {
 
     initializeAgent();
   }, [user, profile, navigate]);
+
+  // NEW: Effect to fetch sold properties when suburb or filter changes
+  useEffect(() => {
+    if (marketingPlan.suburb) {
+      fetchSoldProperties(marketingPlan.suburb, planSoldPropertiesFilter);
+    }
+  }, [marketingPlan.suburb, planSoldPropertiesFilter]);
+
   useEffect(() => {
     if (user?.id) {
       fetchActualProgress(user.id);
@@ -566,6 +650,9 @@ export function MarketingPlanPage() {
     setIsCustomSuburb(false);
     setErrors({});
     setSelectedActivity('all');
+    setSoldPropertiesFilter('30_days');
+    // NEW: Reset plan-specific filter
+    setPlanSoldPropertiesFilter('30_days');
     setSaveError(null);
     setSaveSuccess(false);
     setActualProgress({
@@ -634,10 +721,7 @@ export function MarketingPlanPage() {
     }
   };
 
-    const handleSelectStreet = (
-    street: { name: string; why: string },
-    type: 'door_knock' | 'phone_call' = 'door_knock' // Default to door_knock
-  ) => {
+  const handleSelectStreet = (street: { name: string; why: string }, type: 'door_knock' | 'phone_call') => {
     if (type === 'door_knock') {
       setMarketingPlan({
         ...marketingPlan,
@@ -675,7 +759,7 @@ export function MarketingPlanPage() {
       });
     }
     setSelectedActivity(type);
-  };;
+  };
 
   const removeStreet = (type: 'door_knock' | 'phone_call', id: string) => {
     if (type === 'door_knock') {
@@ -751,13 +835,14 @@ export function MarketingPlanPage() {
       </div>
     );
   }
+
   const handleBackToDashboard = () => {
-  if (profile?.role === 'admin') {
-    navigate('/admin-dashboard');
-  } else {
-    navigate('/agent-dashboard');
-  }
-};
+    if (profile?.role === 'admin') {
+      navigate('/admin-dashboard');
+    } else {
+      navigate('/agent-dashboard');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
@@ -1028,12 +1113,72 @@ export function MarketingPlanPage() {
               )}
             </div>
 
+            {/* NEW: Sold Properties Filter Section */}
+            <motion.div
+              className="bg-gray-50 p-6 rounded-lg shadow-sm"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.6 }}
+            >
+              <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                <svg
+                  className="w-5 h-5 mr-2 text-indigo-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+                  />
+                </svg>
+                Sold Properties
+              </h2>
+              <div className="mb-4">
+                <label className="block text-gray-800 font-semibold mb-2">Filter Sold Properties</label>
+                <select
+                  value={planSoldPropertiesFilter}
+                  onChange={(e) => setPlanSoldPropertiesFilter(e.target.value)}
+                  className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
+                  aria-label="Select sold properties filter"
+                >
+                  <option value="all">All Time</option>
+                  <option value="30_days">Last 30 Days</option>
+                  <option value="2_months">Last 2 Months</option>
+                  <option value="3_months">Last 3 Months</option>
+                  <option value="4_months">Last 4 Months</option>
+                  <option value="6_months">Last 6 Months</option>
+                </select>
+              </div>
+              {soldProperties.length > 0 ? (
+                <div>
+                  <p className="text-gray-700 font-medium mb-2">
+                    Total Sold Properties: {soldProperties.length}
+                  </p>
+                  <p className="text-gray-700 font-medium mb-4">
+                    Average Sold Price: {averageSoldPrice ? `$${averageSoldPrice.toLocaleString()}` : 'N/A'}
+                  </p>
+                  <div className="grid grid-cols-1 gap-4">
+                    {soldProperties.map((property) => (
+                      <div key={property.id} className="border p-4 rounded-lg bg-white shadow-sm">
+                        <p><strong>Address:</strong> {property.address}</p>
+                        <p><strong>Sold Price:</strong> ${property.sold_price.toLocaleString()}</p>
+                        <p><strong>Sold Date:</strong> {new Date(property.sold_date).toLocaleDateString()}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-600">No sold properties found for the selected suburb and filter.</p>
+              )}
+            </motion.div>
+
             <StreetSuggestions
               suburb={marketingPlan.suburb || null}
-              onSelectStreet={(street) => {
-                setMarketingPlan((prev) =>({ ...prev, suburb: street.name}));
-              }}
-  
+              soldPropertiesFilter={soldPropertiesFilter}
+              onSelectStreet={(street, type) => handleSelectStreet(street, type)}
             />
 
             <motion.div
@@ -1045,6 +1190,7 @@ export function MarketingPlanPage() {
               <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                 <svg
                   className="w-5 h-5 mr-2 text-indigo-600"
+                  data-testid="progress-icon"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"

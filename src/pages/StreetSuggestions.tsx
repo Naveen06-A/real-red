@@ -5,6 +5,28 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BarChart2, Home } from 'lucide-react';
+import { Bar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
+import { formatCurrency, normalizeSuburb } from '../reportsUtils';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ChartDataLabels
+);
 
 // Coordinate generator for map
 const generateCoordinates = (suburb: string) => {
@@ -19,8 +41,8 @@ const generateCoordinates = (suburb: string) => {
     'Chapel Hill QLD 4069': { latitude: -27.5033, longitude: 152.9477 },
     'Kenmore QLD 4069': { latitude: -27.5076, longitude: 152.9388 },
     'Kenmore Hills QLD 4069': { latitude: -27.4988, longitude: 152.9322 },
-    'SPRINGFIELD QLD 4300': { lat: -27.653, lng: 152.918 },
-    'SPRING MOUNTAIN QLD 4300': { lat: -27.690, lng: 152.895 },
+    'Spring Mountain QLD 4300': { latitude: -27.690, longitude: 152.895 },
+    'Springfield QLD 4300': { latitude: -27.653, longitude: 152.918 },
   };
   const coords = baseCoords[suburb] || { latitude: -27.5, longitude: 152.9 };
   return {
@@ -29,34 +51,21 @@ const generateCoordinates = (suburb: string) => {
   };
 };
 
-// Predefined suburbs
-const PREDEFINED_SUBURBS = [
-  'Moggill QLD 4070',
-  'Bellbowrie QLD 4070',
-  'Pullenvale QLD 4069',
-  'Brookfield QLD 4069',
-  'Anstead QLD 4070',
-  'Chapel Hill QLD 4069',
-  'Kenmore QLD 4069',
-  'Kenmore Hills QLD 4069',
-  'Fig Tree Pocket QLD 4069',
-  'Pinjara Hills QLD 4069',
-  'Spring Mountain QLD 4300',
-  'Springfield QLD 4300'
-];
-
 interface Property {
   id: string;
   street_name: string | null;
   street_number: string | null;
   suburb: string;
   price: number | null;
-}
-
-interface PastRecord {
-  property_id: string;
-  sold_price: number;
-  sold_date: string;
+  sold_price: number | null;
+  sold_date: string | null;
+  property_type: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  car_garage: number | null;
+  sqm: number | null;
+  landsize: number | null;
+  status: 'Listed' | 'Sold';
 }
 
 interface StreetStats {
@@ -65,53 +74,27 @@ interface StreetStats {
   sold_count: number;
   total_properties: number;
   coordinates: { latitude: number; longitude: number };
+  average_sold_price: number | null;
+  properties: Property[];
 }
 
 interface StreetSuggestionsProps {
   suburb: string | null;
-  onSelectStreet: (street: { name: string; why: string }) => void;
+  soldPropertiesFilter: string;
+  onSelectStreet: (street: { name: string; why: string }, type: 'door_knock' | 'phone_call') => void;
 }
 
-export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsProps) {
+export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet }: StreetSuggestionsProps) {
   const [streetStats, setStreetStats] = useState<StreetStats[]>([]);
   const [availableSuburbs, setAvailableSuburbs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedStreet, setSelectedStreet] = useState<string | null>(null);
+  const [localFilter, setLocalFilter] = useState(soldPropertiesFilter);
 
-  // Normalize suburb names
-  const normalizeSuburb = (rawSuburb: string): string => {
-    const cleanSuburb = rawSuburb
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .replace(/qld\s*\d{4}/i, '')
-      .replace(/\d{4}/, '');
-    
-    const suburbMap: { [key: string]: string } = {
-      'chapell': 'Chapel Hill QLD 4069',
-      'chapell hill': 'Chapel Hill QLD 4069',
-      'chapel hill': 'Chapel Hill QLD 4069',
-      'bellbowrie': 'Bellbowrie QLD 4070',
-      'moggill': 'Moggill QLD 4070',
-      'pulllenvale': 'Pullenvale QLD 4069',
-      'pullenvale': 'Pullenvale QLD 4069',
-      'fig tree pocket': 'Fig Tree Pocket QLD 4069',
-      'kenmore': 'Kenmore QLD 4069',
-      'brookfield': 'Brookfield QLD 4069',
-      'anstead': 'Anstead QLD 4070',
-      'kenmore hills': 'Kenmore Hills QLD 4069',
-      'pinjara hills': 'Pinjara Hills QLD 4069',
-      'pinjarra hills': 'Pinjara Hills QLD 4069',
-      'spring mountain' : 'Spring Mountain QLD 4300',
-      'springfield': 'Springfield QLD 4300'
-
-    };
-
-    return suburbMap[cleanSuburb] || PREDEFINED_SUBURBS.find((s) =>
-      s.toLowerCase().includes(cleanSuburb)
-    ) || rawSuburb;
-  };
+  useEffect(() => {
+    setLocalFilter(soldPropertiesFilter);
+  }, [soldPropertiesFilter]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -126,16 +109,25 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
           .select('suburb')
           .limit(1000);
         if (suburbsError) throw new Error(`Failed to fetch suburbs: ${suburbsError.message}`);
-        
-        const rawSuburbs = [...new Set(allSuburbsData?.map((p) => p.suburb) || [])];
-        console.log('Raw suburbs from database:', rawSuburbs);
 
+        const rawSuburbs = [...new Set(allSuburbsData?.map((p) => p.suburb) || [])];
         const normalizedSuburbs = rawSuburbs.map(normalizeSuburb);
-        const uniqueSuburbs = [...new Set(normalizedSuburbs)].filter((s) =>
-          PREDEFINED_SUBURBS.includes(s)
-        );
-        setAvailableSuburbs([...new Set([...PREDEFINED_SUBURBS, ...uniqueSuburbs])].sort());
-        console.log('Available suburbs:', uniqueSuburbs);
+        const predefinedSuburbs = [
+          'Moggill QLD 4070',
+          'Bellbowrie QLD 4070',
+          'Pullenvale QLD 4069',
+          'Brookfield QLD 4069',
+          'Anstead QLD 4070',
+          'Chapel Hill QLD 4069',
+          'Kenmore QLD 4069',
+          'Kenmore Hills QLD 4069',
+          'Fig Tree Pocket QLD 4069',
+          'Pinjara Hills QLD 4069',
+          'Spring Mountain QLD 4300',
+          'Springfield QLD 4300',
+        ];
+        const uniqueSuburbs = [...new Set([...predefinedSuburbs, ...normalizedSuburbs])].sort();
+        setAvailableSuburbs(uniqueSuburbs);
 
         if (!suburb) {
           setLoading(false);
@@ -145,49 +137,90 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
         // Fetch properties
         const normalizedInput = normalizeSuburb(suburb).toLowerCase().split(' qld')[0];
         const queryString = `%${normalizedInput}%`;
-        console.log('Input suburb:', suburb, 'Query string:', queryString);
 
-        const { data: properties, error: propError } = await supabase
+        const { data: propertiesData, error: propError } = await supabase
           .from('properties')
-          .select('id, street_name, street_number, suburb, price')
+          .select('id, street_name, street_number, suburb, price, property_type, bedrooms, bathrooms, car_garage, sqm, landsize')
           .ilike('suburb', queryString);
 
-        if (propError) {
-          console.error('Property fetch error:', propError);
-          throw new Error(`Failed to fetch properties: ${propError.message}`);
-        }
+        if (propError) throw new Error(`Failed to fetch properties: ${propError.message}`);
 
-        console.log('Fetched properties:', properties);
-        if (!properties || properties.length === 0) {
+        if (!propertiesData || propertiesData.length === 0) {
           setError(`No data found for ${suburb}. Please add properties to the database.`);
           setLoading(false);
           return;
         }
 
-        // Fetch past records
-        const { data: pastRecords, error: pastError } = await supabase
+        // Fetch past records with time filter
+        let pastRecordsQuery = supabase
           .from('past_records')
-          .select('property_id, sold_price, sold_date');
-        if (pastError) {
-          console.warn('Past records error:', pastError);
-        }
-        console.log('Past records:', pastRecords);
+          .select('property_id, sold_price, sold_date')
+          .not('sold_price', 'is', null);
 
-        // Aggregate stats
-        const soldPropertyIds = new Set(
-          (pastRecords || []).map((record: PastRecord) => record.property_id)
-        );
-        const streetMap = new Map<string, { listed: number; sold: number; total: number }>();
-        properties.forEach((prop) => {
-          const streetName = prop.street_name?.trim() || 'Unknown Street';
-          const stats = streetMap.get(streetName) || { listed: 0, sold: 0, total: 0 };
-          stats.total += 1;
-          if (prop.price !== null) stats.listed += 1;
-          if (soldPropertyIds.has(prop.id)) stats.sold += 1;
-          streetMap.set(streetName, stats);
+        if (localFilter !== 'all') {
+          const now = new Date();
+          let startDate: Date;
+          switch (localFilter) {
+            case '30_days':
+              startDate = new Date(now.setDate(now.getDate() - 30));
+              break;
+            case '3_months':
+              startDate = new Date(now.setMonth(now.getMonth() - 3));
+              break;
+            case '6_months':
+              startDate = new Date(now.setMonth(now.getMonth() - 6));
+              break;
+            case '12_months':
+              startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+              break;
+            default:
+              startDate = new Date(0);
+          }
+          pastRecordsQuery = pastRecordsQuery.gte('sold_date', startDate.toISOString());
+        }
+
+        const { data: pastRecords, error: pastError } = await pastRecordsQuery;
+        if (pastError) console.warn('Past records error:', pastError);
+
+        // Combine properties with past records
+        const soldPropertyIds = new Set(pastRecords?.map((record) => record.property_id) || []);
+        const combinedProperties: Property[] = propertiesData.map((prop) => {
+          const record = pastRecords?.find((r) => r.property_id === prop.id);
+          return {
+            id: prop.id,
+            street_name: prop.street_name,
+            street_number: prop.street_number,
+            suburb: prop.suburb,
+            price: prop.price,
+            sold_price: record?.sold_price || null,
+            sold_date: record?.sold_date || null,
+            property_type: prop.property_type,
+            bedrooms: prop.bedrooms,
+            bathrooms: prop.bathrooms,
+            car_garage: prop.car_garage,
+            sqm: prop.sqm,
+            landsize: prop.landsize,
+            status: record ? 'Sold' : 'Listed',
+          };
         });
 
-        console.log('Street stats:', Object.fromEntries(streetMap));
+        // Aggregate street stats
+        const streetMap = new Map<
+          string,
+          { listed: number; sold: number; total: number; totalSoldPrice: number; properties: Property[] }
+        >();
+        combinedProperties.forEach((prop) => {
+          const streetName = prop.street_name?.trim() || 'Unknown Street';
+          const stats = streetMap.get(streetName) || { listed: 0, sold: 0, total: 0, totalSoldPrice: 0, properties: [] };
+          stats.total += 1;
+          if (prop.status === 'Listed') stats.listed += 1;
+          if (prop.status === 'Sold' && prop.sold_price) {
+            stats.sold += 1;
+            stats.totalSoldPrice += prop.sold_price;
+          }
+          stats.properties.push(prop);
+          streetMap.set(streetName, stats);
+        });
 
         const statsArray: StreetStats[] = Array.from(streetMap.entries()).map(
           ([street_name, stats], index) => ({
@@ -199,19 +232,19 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
               latitude: generateCoordinates(suburb).latitude + index * 0.001,
               longitude: generateCoordinates(suburb).longitude,
             },
+            average_sold_price: stats.sold > 0 ? stats.totalSoldPrice / stats.sold : null,
+            properties: stats.properties,
           })
         );
 
-        // Sort by sold_count (descending), then total_properties, then listed_count
         statsArray.sort(
           (a, b) =>
             b.sold_count - a.sold_count ||
             b.total_properties - a.total_properties ||
             b.listed_count - a.listed_count
         );
-        setStreetStats(statsArray); // Removed .slice(0, 5) to show all streets
+        setStreetStats(statsArray);
       } catch (err: any) {
-        console.error('Fetch error:', err);
         setError(`No data found for ${suburb}. Error: ${err.message}`);
       } finally {
         setLoading(false);
@@ -219,7 +252,7 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
     };
 
     fetchData();
-  }, [suburb]);
+  }, [suburb, localFilter]);
 
   const getSuggestionText = (street: StreetStats) => {
     if (street.sold_count > street.listed_count * 0.5 && street.sold_count > 0) {
@@ -232,12 +265,98 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
     return `Moderate activity. Consider door knocks.`;
   };
 
-  const handleSelectStreet = (street: StreetStats) => {
-    onSelectStreet({
-      name: street.street_name,
-      why: getSuggestionText(street),
-    });
-    setSelectedStreet(street.street_name);
+  const handleSelectStreet = (street: StreetStats, type: 'door_knock' | 'phone_call') => {
+    onSelectStreet(
+      {
+        name: street.street_name,
+        why: getSuggestionText(street),
+      },
+      type
+    );
+    setSelectedStreet(street.street_name === selectedStreet ? null : street.street_name);
+  };
+
+  // Chart for sold properties and average sold price
+  const soldPropertiesChart = {
+    labels: selectedStreet
+      ? [selectedStreet]
+      : streetStats.map((street) => street.street_name),
+    datasets: [
+      {
+        label: 'Sold Properties',
+        data: selectedStreet
+          ? [streetStats.find((s) => s.street_name === selectedStreet)?.sold_count || 0]
+          : streetStats.map((street) => street.sold_count),
+        backgroundColor: '#60A5FA',
+        yAxisID: 'y',
+      },
+      {
+        label: 'Average Sold Price',
+        data: selectedStreet
+          ? [
+              streetStats.find((s) => s.street_name === selectedStreet)?.average_sold_price || 0,
+            ]
+          : streetStats.map((street) =>
+              street.average_sold_price !== null ? street.average_sold_price : 0
+            ),
+        backgroundColor: '#93C5FD',
+        yAxisID: 'y1',
+      },
+    ],
+  };
+
+  const chartOptions = {
+    plugins: {
+      legend: { position: 'top' as const, labels: { font: { size: 14 } } },
+      title: {
+        display: true,
+        text: `Sold Properties and Average Sold Price by Street in ${suburb || 'Selected Suburb'} (Filter: ${localFilter.replace('_', ' ')})`,
+        font: { size: 18, weight: 'bold' as const },
+      },
+      tooltip: {
+        callbacks: {
+          label: (context: any) => {
+            if (context.dataset.label === 'Sold Properties') {
+              return `${context.dataset.label}: ${context.raw}`;
+            }
+            return `${context.dataset.label}: ${formatCurrency(context.raw)}`;
+          },
+        },
+      },
+      datalabels: {
+        display: true,
+        color: '#1E3A8A',
+        font: { size: 12 },
+        formatter: (value: number, context: any) => {
+          if (context.dataset.label === 'Sold Properties') {
+            return value > 0 ? value : '';
+          }
+          return value > 0 ? formatCurrency(value) : '';
+        },
+      },
+    },
+    scales: {
+      y: {
+        type: 'linear' as const,
+        position: 'left' as const,
+        title: { display: true, text: 'Number of Sold Properties' },
+        beginAtZero: true,
+        ticks: { stepSize: 1 },
+      },
+      y1: {
+        type: 'linear' as const,
+        position: 'right' as const,
+        title: { display: true, text: 'Average Sold Price' },
+        beginAtZero: true,
+        grid: { drawOnChartArea: false },
+        ticks: {
+          callback: (value: number) => formatCurrency(value),
+        },
+      },
+      x: {
+        ticks: { font: { size: 12 } },
+      },
+    },
   };
 
   if (loading) {
@@ -262,16 +381,16 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
     >
       <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
         <Home className="w-5 h-5 mr-2 text-indigo-600" />
-        {suburb ? `Top Streets in ${suburb}` : 'Properties by Suburb'}
+        {suburb ? `Street Suggestions in ${suburb} (Filter: ${localFilter.replace('_', ' ')})` : 'Properties by Suburb'}
       </h2>
       {error && (
-        <div className="text-red-600 text-center py-4">
-          {error}
-        </div>
+        <div className="text-red-600 text-center py-4">{error}</div>
       )}
       {!suburb && (
         <div className="mb-4">
-          <h3 className="text-lg font-medium text-gray-800 mb-2">Available Suburbs</h3>
+          <h3 className="text-lg font-medium text-gray-800 mb-2">
+            Available Suburbs
+          </h3>
           {availableSuburbs.length === 0 ? (
             <p className="text-gray-600">No suburbs found in the database.</p>
           ) : (
@@ -280,7 +399,12 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
                 <li
                   key={availSuburb}
                   className="text-gray-700 hover:text-indigo-600 cursor-pointer"
-                  onClick={() => onSelectStreet({ name: availSuburb, why: `Selected suburb: ${availSuburb}` })}
+                  onClick={() =>
+                    onSelectStreet(
+                      { name: availSuburb, why: `Selected suburb: ${availSuburb}` },
+                      'door_knock'
+                    )
+                  }
                 >
                   {availSuburb}
                 </li>
@@ -293,87 +417,233 @@ export function StreetSuggestions({ suburb, onSelectStreet }: StreetSuggestionsP
         <p className="text-gray-600">No data found for {suburb}.</p>
       )}
       {suburb && streetStats.length > 0 && (
-        <div className="space-y-4">
-          {streetStats.map((street, index) => (
-            <motion.div
-              key={street.street_name}
-              className="border border-gray-200 p-4 rounded-lg bg-gray-50 hover:shadow-md transition-shadow duration-200"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: index * 0.1 }}
+        <div className="space-y-8">
+          {/* Filter Dropdown */}
+          <div>
+            <label className="block text-gray-800 font-semibold mb-2">Filter Sold Properties</label>
+            <select
+              value={localFilter}
+              onChange={(e) => setLocalFilter(e.target.value)}
+              className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200 bg-gray-50"
+              aria-label="Select sold properties filter"
             >
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="text-lg font-medium text-gray-800">
-                  {index + 1}. {street.street_name}
-                </h3>
-                <motion.button
-                  onClick={() => handleSelectStreet(street)}
-                  className={`px-4 py-2 rounded-full text-white ${
-                    selectedStreet === street.street_name
-                      ? 'bg-green-600 hover:bg-green-700'
-                      : 'bg-indigo-600 hover:bg-indigo-700'
-                  } transition-all shadow-md`}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+              <option value="all">All Time</option>
+              <option value="30_days">Last 30 Days</option>
+              <option value="3_months">Last 3 Months</option>
+              <option value="6_months">Last 6 Months</option>
+              <option value="12_months">Last 12 Months</option>
+            </select>
+          </div>
+
+          {/* Street Statistics Section */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Street Statistics</h3>
+            <div className="space-y-4">
+              {streetStats.map((street, index) => (
+                <motion.div
+                  key={street.street_name}
+                  className="border border-gray-200 p-4 rounded-lg bg-gray-50 hover:shadow-md transition-shadow duration-200"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: index * 0.1 }}
                 >
-                  {selectedStreet === street.street_name ? 'Selected' : 'Add to Plan'}
-                </motion.button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-gray-700">
-                    <strong>Total Properties:</strong> {street.total_properties}
-                  </p>
-                  <p className="text-gray-700">
-                    <strong>Listings:</strong> {street.listed_count}
-                  </p>
-                  <p className="text-gray-700">
-                    <strong>Sold:</strong> {street.sold_count}
-                  </p>
-                  <p className="text-gray-600 mt-2">{getSuggestionText(street)}</p>
-                  <div className="mt-2">
-                    <p className="text-sm text-gray-600">Sales Rate</p>
-                    <div className="bg-gray-200 rounded-full h-3 overflow-hidden">
-                      <div
-                        className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full"
-                        style={{
-                          width: `${
-                            street.listed_count
-                              ? (street.sold_count / street.listed_count) * 100
-                              : 0
-                          }%`,
-                        }}
-                      />
+                  <div className="flex justify-between items-center mb-2">
+                    <h4
+                      className="text-lg font-medium text-gray-800 cursor-pointer hover:text-indigo-600"
+                      onClick={() => handleSelectStreet(street, 'door_knock')}
+                    >
+                      {index + 1}. {street.street_name}
+                    </h4>
+                    <div className="flex gap-2">
+                      <motion.button
+                        onClick={() => handleSelectStreet(street, 'door_knock')}
+                        className={`px-4 py-2 rounded-full text-white ${
+                          selectedStreet === street.street_name &&
+                          getSuggestionText(street).includes('door knocks')
+                            ? 'bg-green-600 hover:bg-green-700'
+                            : 'bg-indigo-600 hover:bg-indigo-700'
+                        } transition-all shadow-md`}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        {selectedStreet === street.street_name &&
+                        getSuggestionText(street).includes('door knocks')
+                          ? 'Selected'
+                          : 'Add to Door Knocks'}
+                      </motion.button>
+                      <motion.button
+                        onClick={() => handleSelectStreet(street, 'phone_call')}
+                        className={`px-4 py-2 rounded-full text-white ${
+                          selectedStreet === street.street_name &&
+                          getSuggestionText(street).includes('phone calls')
+                            ? 'bg-green-600 hover:bg-green-700'
+                            : 'bg-indigo-600 hover:bg-indigo-700'
+                        } transition-all shadow-md`}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        {selectedStreet === street.street_name &&
+                        getSuggestionText(street).includes('phone calls')
+                          ? 'Selected'
+                          : 'Add to Phone Calls'}
+                      </motion.button>
                     </div>
                   </div>
-                </div>
-                <div className="h-32 rounded-lg overflow-hidden">
-                  <MapContainer
-                    center={[street.coordinates.latitude, street.coordinates.longitude]}
-                    zoom={16}
-                    style={{ height: '100%', width: '100%' }}
-                    dragging={false}
-                    zoomControl={false}
-                    scrollWheelZoom={false}
-                    doubleClickZoom={false}
-                  >
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                    <Marker
-                      position={[street.coordinates.latitude, street.coordinates.longitude]}
-                      icon={L.divIcon({
-                        className: 'custom-icon',
-                        html: `<div style="background-color: #FF5555; width: 12px; height: 12px; border-radius: 50%;"></div>`,
-                        iconSize: [12, 12],
-                        iconAnchor: [6, 6],
-                      })}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-gray-700">
+                        <strong>Total Properties:</strong> {street.total_properties}
+                      </p>
+                      <p className="text-gray-700">
+                        <strong>Listings:</strong> {street.listed_count}
+                      </p>
+                      <p className="text-gray-700">
+                        <strong>Sold:</strong> {street.sold_count}
+                      </p>
+                      <p className="text-gray-700">
+                        <strong>Average Sold Price:</strong>{' '}
+                        {street.average_sold_price
+                          ? formatCurrency(street.average_sold_price)
+                          : 'N/A'}
+                      </p>
+                      <p className="text-gray-600 mt-2">
+                        {getSuggestionText(street)}
+                      </p>
+                      <div className="mt-2">
+                        <p className="text-sm text-gray-600">Sales Rate</p>
+                        <div className="bg-gray-200 rounded-full h-3 overflow-hidden">
+                          <div
+                            className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-3 rounded-full"
+                            style={{
+                              width: `${
+                                street.listed_count
+                                  ? (street.sold_count / street.listed_count) * 100
+                                  : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="h-32 rounded-lg overflow-hidden">
+                      <MapContainer
+                        center={[street.coordinates.latitude, street.coordinates.longitude]}
+                        zoom={16}
+                        style={{ height: '100%', width: '100%' }}
+                        dragging={false}
+                        zoomControl={false}
+                        scrollWheelZoom={false}
+                        doubleClickZoom={false}
+                      >
+                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                        <Marker
+                          position={[street.coordinates.latitude, street.coordinates.longitude]}
+                          icon={L.divIcon({
+                            className: 'custom-icon',
+                            html: `<div style="background-color: #FF5555; width: 12px; height: 12px; border-radius: 50%;"></div>`,
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6],
+                          })}
+                        >
+                          <Popup>{street.street_name}</Popup>
+                        </Marker>
+                      </MapContainer>
+                    </div>
+                  </div>
+                  {/* Property Details for Selected Street */}
+                  {selectedStreet === street.street_name && (
+                    <motion.div
+                      className="mt-4"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      transition={{ duration: 0.3 }}
                     >
-                      <Popup>{street.street_name}</Popup>
-                    </Marker>
-                  </MapContainer>
-                </div>
-              </div>
-            </motion.div>
-          ))}
+                      <h5 className="text-md font-semibold text-gray-800 mb-2">
+                        Properties on {street.street_name}
+                      </h5>
+                      <p className="text-gray-700 mb-4">
+                        <strong>Total Properties:</strong> {street.properties.length}
+                        <span className="mx-2">|</span>
+                        <strong>Listed Properties:</strong>{' '}
+                        {street.properties.filter((p) => p.status === 'Listed').length}
+                        <span className="mx-2">|</span>
+                        <strong>Sold Properties:</strong>{' '}
+                        {street.properties.filter((p) => p.status === 'Sold').length}
+                        <span className="mx-2">|</span>
+                        <strong>Average Sold Price:</strong>{' '}
+                        {street.average_sold_price
+                          ? formatCurrency(street.average_sold_price)
+                          : 'N/A'}
+                      </p>
+                      {street.properties.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse">
+                            <thead>
+                              <tr className="bg-indigo-600 text-white">
+                                <th className="p-3 text-left">Street Number</th>
+                                <th className="p-3 text-left">Street Name</th>
+                                <th className="p-3 text-left">Suburb</th>
+                                <th className="p-3 text-left">Property Type</th>
+                                <th className="p-3 text-left">Bedrooms</th>
+                                <th className="p-3 text-left">Bathrooms</th>
+                                <th className="p-3 text-left">Car Garage</th>
+                                <th className="p-3 text-left">SQM</th>
+                                <th className="p-3 text-left">Land Size</th>
+                                <th className="p-3 text-left">Listed Price</th>
+                                <th className="p-3 text-left">Sold Price</th>
+                                <th className="p-3 text-left">Sold Date</th>
+                                <th className="p-3 text-left">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {street.properties.map((property) => (
+                                <motion.tr
+                                  key={property.id}
+                                  className="border-b border-gray-200 hover:bg-gray-100"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  transition={{ duration: 0.3 }}
+                                >
+                                  <td className="p-3">{property.street_number || 'N/A'}</td>
+                                  <td className="p-3">{property.street_name || 'N/A'}</td>
+                                  <td className="p-3">{normalizeSuburb(property.suburb)}</td>
+                                  <td className="p-3">{property.property_type || 'N/A'}</td>
+                                  <td className="p-3">{property.bedrooms ?? 'N/A'}</td>
+                                  <td className="p-3">{property.bathrooms ?? 'N/A'}</td>
+                                  <td className="p-3">{property.car_garage ?? 'N/A'}</td>
+                                  <td className="p-3">{property.sqm ?? 'N/A'}</td>
+                                  <td className="p-3">{property.landsize ?? 'N/A'}</td>
+                                  <td className="p-3">{property.price ? formatCurrency(property.price) : 'N/A'}</td>
+                                  <td className="p-3">{property.sold_price ? formatCurrency(property.sold_price) : 'N/A'}</td>
+                                  <td className="p-3">{property.sold_date ? new Date(property.sold_date).toLocaleDateString() : 'N/A'}</td>
+                                  <td className="p-3">{property.status}</td>
+                                </motion.tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-gray-600">No properties found for {street.street_name}.</p>
+                      )}
+                    </motion.div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
+          {/* Chart Section */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <BarChart2 className="w-5 h-5 mr-2 text-indigo-600" />
+              Sales Overview
+            </h3>
+            {soldPropertiesChart.labels.length > 0 ? (
+              <Bar data={soldPropertiesChart} options={chartOptions} />
+            ) : (
+              <p className="text-gray-600">No data available for chart.</p>
+            )}
+          </div>
         </div>
       )}
     </motion.div>

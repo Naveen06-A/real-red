@@ -1,12 +1,11 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { LogOut, User, Building, BarChart3, Users, LogIn, Shield } from 'lucide-react';
+import { LogOut, User, Building, BarChart3, Users, LogIn, Shield,Link as LinkIcon } from 'lucide-react';
 import { Logo } from './Logo';
 export function Navigation() {
   const { user, profile, signOut } = useAuthStore();
   const navigate = useNavigate();
-
   const handleSignOut = async () => {
     await signOut();
     navigate('/agent-login');
@@ -55,6 +54,12 @@ export function Navigation() {
                       <Users className="w-5 h-5" />
                       <span>Agents</span>
                     </Link>
+                    <a href="https://asrtovibe.netlify.app/" target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-blue-600 flex items-center space-x-1">
+                      <LinkIcon className="w-5 h-5" />
+                      <span>AstroVibe</span>
+                    </a>
+
+                    
                   </>
                 )}
 
