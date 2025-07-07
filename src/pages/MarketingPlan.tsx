@@ -30,7 +30,7 @@ const PREDEFINED_SUBURBS = [
   'Pullenvale QLD 4069',
   'Brookfield QLD 4069',
   'Anstead QLD 4070',
-  'Chapell Hill QLD 4069',
+  'Chapel Hill QLD 4069',
   'Kenmore QLD 4069',
   'Kenmore Hills QLD 4069',
   'Fig Tree Pocket QLD 4069',

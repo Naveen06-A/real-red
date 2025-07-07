@@ -31,18 +31,18 @@ ChartJS.register(
 // Coordinate generator for map
 const generateCoordinates = (suburb: string) => {
   const baseCoords: { [key: string]: { latitude: number; longitude: number } } = {
-    'Moggill QLD 4070': { latitude: -27.5716, longitude: 152.8731 },
-    'Bellbowrie QLD 4070': { latitude: -27.5589, longitude: 152.8877 },
-    'Pinjara Hills QLD 4069': { latitude: -27.5380, longitude: 152.9575 },
-    'Fig Tree Pocket QLD 4069': { latitude: -27.5283, longitude: 152.9716 },
-    'Pullenvale QLD 4069': { latitude: -27.5228, longitude: 152.8866 },
-    'Brookfield QLD 4069': { latitude: -27.4985, longitude: 152.9007 },
-    'Anstead QLD 4070': { latitude: -27.5387, longitude: 152.8621 },
-    'Chapel Hill QLD 4069': { latitude: -27.5033, longitude: 152.9477 },
-    'Kenmore QLD 4069': { latitude: -27.5076, longitude: 152.9388 },
-    'Kenmore Hills QLD 4069': { latitude: -27.4988, longitude: 152.9322 },
-    'Spring Mountain QLD 4300': { latitude: -27.690, longitude: 152.895 },
-    'Springfield QLD 4300': { latitude: -27.653, longitude: 152.918 },
+    'Moggill': { latitude: -27.5716, longitude: 152.8731 },
+    'Bellbowrie': { latitude: -27.5589, longitude: 152.8877 },
+    'Pinjara Hills': { latitude: -27.5380, longitude: 152.9575 },
+    'Fig Tree Pocket': { latitude: -27.5283, longitude: 152.9716 },
+    'Pullenvale': { latitude: -27.5228, longitude: 152.8866 },
+    'Brookfield': { latitude: -27.4985, longitude: 152.9007 },
+    'Anstead': { latitude: -27.5387, longitude: 152.8621 },
+    'Chapel Hill': { latitude: -27.5033, longitude: 152.9477 },
+    'Kenmore': { latitude: -27.5076, longitude: 152.9388 },
+    'Kenmore Hills': { latitude: -27.4988, longitude: 152.9322 },
+    'Spring Mountain': { latitude: -27.690, longitude: 152.895 },
+    'Springfield': { latitude: -27.653, longitude: 152.918 },
   };
   const coords = baseCoords[suburb] || { latitude: -27.5, longitude: 152.9 };
   return {
@@ -113,18 +113,18 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
         const rawSuburbs = [...new Set(allSuburbsData?.map((p) => p.suburb) || [])];
         const normalizedSuburbs = rawSuburbs.map(normalizeSuburb);
         const predefinedSuburbs = [
-          'Moggill QLD 4070',
-          'Bellbowrie QLD 4070',
-          'Pullenvale QLD 4069',
-          'Brookfield QLD 4069',
-          'Anstead QLD 4070',
-          'Chapel Hill QLD 4069',
-          'Kenmore QLD 4069',
-          'Kenmore Hills QLD 4069',
-          'Fig Tree Pocket QLD 4069',
-          'Pinjara Hills QLD 4069',
-          'Spring Mountain QLD 4300',
-          'Springfield QLD 4300',
+          'Moggill',
+          'Bellbowrie',
+          'Pullenvale',
+          'Brookfield',
+          'Anstead',
+          'Chapel Hill',
+          'Kenmore',
+          'Kenmore Hills',
+          'Fig Tree Pocket',
+          'Pinjara Hills',
+          'Spring Mountain',
+          'Springfield',
         ];
         const uniqueSuburbs = [...new Set([...predefinedSuburbs, ...normalizedSuburbs])].sort();
         setAvailableSuburbs(uniqueSuburbs);
@@ -140,48 +140,60 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
 
         console.log('Fetching properties for suburb:', suburb, 'Normalized:', normalizedInput, 'Query:', queryString);
 
-        // Fetch properties for the selected suburb
-        let propertiesQuery = supabase
+        // Fetch all properties for the suburb (ignore sold_date filter initially)
+        const { data: propertiesData, error: propError } = await supabase
           .from('properties')
           .select('id, street_name, street_number, suburb, price, sold_price, sold_date, property_type, bedrooms, bathrooms, car_garage, sqm, landsize')
           .ilike('suburb', queryString);
 
-        if (localFilter !== 'all') {
-          const now = new Date('2025-07-06T16:45:00+05:30'); // Current date: July 6, 2025, 4:45 PM IST
-          let startDate: Date;
-          switch (localFilter) {
-            case '30_days':
-              startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
-              break;
-            case '3_months':
-              startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); // 90 days ago
-              break;
-            case '6_months':
-              startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000); // 180 days ago
-              break;
-            case '12_months':
-              startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); // 365 days ago
-              break;
-            default:
-              startDate = new Date(0); // No date restriction
-          }
-          console.log('Applying filter:', localFilter, 'Start date:', startDate.toISOString());
-          propertiesQuery = propertiesQuery.gte('sold_date', startDate.toISOString());
-        }
-
-        const { data: propertiesData, error: propError } = await propertiesQuery;
         if (propError) throw new Error(`Failed to fetch properties: ${propError.message}`);
 
         if (!propertiesData || propertiesData.length === 0) {
-          setError(`No properties found for ${suburb}. Please add properties to the database.`);
+          setError(`No properties found for ${suburb}. Please add properties to the database or check the suburb name format.`);
           setLoading(false);
           return;
         }
 
-        console.log('Properties fetched:', propertiesData);
+        console.log('All properties fetched:', propertiesData);
+
+        // Apply sold_date filter if needed
+        let filteredProperties = propertiesData;
+        if (localFilter !== 'all') {
+          const now = new Date('2025-07-07T09:46:00+05:30'); // Current date: July 7, 2025, 9:46 AM IST
+          let startDate: Date;
+          switch (localFilter) {
+            case '30_days':
+              startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+              break;
+            case '3_months':
+              startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+              break;
+            case '6_months':
+              startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+              break;
+            case '12_months':
+              startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+              break;
+            default:
+              startDate = new Date(0);
+          }
+          console.log('Applying filter:', localFilter, 'Start date:', startDate.toISOString());
+          filteredProperties = propertiesData.filter(
+            (prop) => !prop.sold_date || new Date(prop.sold_date) >= startDate
+          );
+        }
+
+        if (filteredProperties.length === 0) {
+          setError(
+            `No properties found for ${suburb} with filter "${localFilter.replace('_', ' ')}". ` +
+            `Try selecting a broader filter (e.g., "All Time") or ensure sold_date is populated for sold properties.`
+          );
+          setLoading(false);
+          return;
+        }
 
         // Map properties to include status
-        const combinedProperties: Property[] = propertiesData.map((prop) => ({
+        const combinedProperties: Property[] = filteredProperties.map((prop) => ({
           id: prop.id,
           street_name: prop.street_name,
           street_number: prop.street_number,
@@ -198,7 +210,7 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
           status: (prop.sold_price || prop.sold_date) ? 'Sold' : 'Listed',
         }));
 
-        console.log('Combined properties:', combinedProperties);
+        console.log('Filtered properties:', combinedProperties);
 
         // Aggregate street stats
         const streetMap = new Map<
@@ -225,8 +237,8 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
             sold_count: stats.sold,
             total_properties: stats.total,
             coordinates: {
-              latitude: generateCoordinates(suburb).latitude + index * 0.001,
-              longitude: generateCoordinates(suburb).longitude,
+              latitude: generateCoordinates(normalizedInput).latitude + index * 0.001,
+              longitude: generateCoordinates(normalizedInput).longitude,
             },
             average_sold_price: stats.sold > 0 ? stats.totalSoldPrice / stats.sold : null,
             properties: stats.properties,
@@ -241,16 +253,6 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
         );
 
         console.log('Street stats:', statsArray);
-
-        // Set error only if no properties or no sold properties match the filter
-        if (statsArray.length === 0) {
-          setError(`No properties found for ${suburb}. Please add properties to the database.`);
-        } else if (statsArray.every((street) => street.sold_count === 0)) {
-          setError(
-            `No sold properties found for ${suburb} with filter "${localFilter.replace('_', ' ')}". ` +
-            `Try selecting a broader filter (e.g., "All Time") or verify sold properties in the database (ensure sold_price or sold_date is populated).`
-          );
-        }
 
         setStreetStats(statsArray);
       } catch (err: any) {
@@ -424,7 +426,7 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
         </div>
       )}
       {suburb && streetStats.length === 0 && !error && (
-        <p className="text-gray-600">No properties found for {suburb}.</p>
+        <p className="text-gray-600">No properties found for {suburb} with the selected filter.</p>
       )}
       {suburb && streetStats.length > 0 && (
         <div className="space-y-8">
@@ -448,12 +450,6 @@ export function StreetSuggestions({ suburb, soldPropertiesFilter, onSelectStreet
           {/* Street Statistics Section */}
           <div>
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Street Statistics</h3>
-            {streetStats.every((street) => street.sold_count === 0) && (
-              <p className="text-gray-600 mb-4">
-                No sold properties found for {suburb} with filter "{localFilter.replace('_', ' ')}".
-                Try selecting a broader filter (e.g., "All Time") or verify sold properties in the database (ensure sold_price or sold_date is populated).
-              </p>
-            )}
             <div className="space-y-4">
               {streetStats.map((street, index) => (
                 <motion.div
