@@ -63,7 +63,7 @@ const ALLOWED_SUBURBS = [
   { name: 'Pullenvale', postcode: '4069' },
   { name: 'Brookfield', postcode: '4069' },
   { name: 'Anstead', postcode: '4070' },
-  { name: 'Chapell Hill', postcode: '4069' },
+  { name: 'Chapel Hill', postcode: '4069' },
   { name: 'Kenmore', postcode: '4069' },
   { name: 'Kenmore Hills', postcode: '4069' },
   { name: 'Fig Tree Pocket', postcode: '4069' },

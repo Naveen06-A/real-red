@@ -34,7 +34,7 @@ export function AdminDashboard() {
   const [jumpToPage, setJumpToPage] = useState('');
 
   const dashboardLinks = [
-    { name: 'Create New Agent', icon: UserPlus, action: () => setShowModal('agent') },
+    { name: 'Create New Agent', icon: UserPlus, path:'/create-agent-modal' },
     { name: 'Add Property', icon: Home, path: '/property-form'},
     { name: 'Create Marketing Plan', path: '/marketing-plan', icon: FileText },
     { name: 'Activity Log', path: '/activity-logger', icon: Activity },

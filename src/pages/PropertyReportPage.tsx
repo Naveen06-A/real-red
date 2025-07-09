@@ -123,8 +123,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: [],
     agents: [],
     agency_names: [],
-    categories: [],
-    propertyTypes: [],
   });
   const [localManualInputs, setLocalManualInputs] = useState(manualInputs || {
     suburbs: '',
@@ -132,8 +130,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: '',
     agents: '',
     agency_names: '',
-    categories: '',
-    propertyTypes: '',
   });
   const [localFilterPreviewCount, setLocalFilterPreviewCount] = useState(filterPreviewCount || 0);
   const [localCurrentPage, setLocalCurrentPage] = useState(currentPage || 1);
@@ -146,8 +142,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: false,
     agents: false,
     agency_names: false,
-    categories: false,
-    propertyTypes: false,
   });
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -160,8 +154,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: filterSuggestions?.streetNumbers || [],
     agents: filterSuggestions?.agents || [],
     agency_names: filterSuggestions?.agency_names || [],
-    categories: filterSuggestions?.categories || [],
-    propertyTypes: filterSuggestions?.propertyTypes || [],
   });
 
   const propertiesTableRef = useRef<HTMLDivElement>(null);
@@ -237,8 +229,6 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         streetNumbers: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_number || '').filter(Boolean))],
         agents: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agent_name || '').filter(Boolean))],
         agency_names: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agency_name || 'Unknown').filter(Boolean))],
-        categories:[...new Set(baseProperties.map((prop: PropertyDetails) => prop?.category || '').filter(Boolean))],
-        
       };
 
       setDynamicFilterSuggestions(newSuggestions);

@@ -205,13 +205,13 @@ export function ProgressReportPage() {
   
 
   // Memoized functions
-  const loadMarketingPlans = useCallback(async (agentId: string) => {
+  const loadMarketingPlans = useCallback(async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('marketing_plans')
-        .select('*')
-        .eq('agent', agentId)
-        .order('updated_at', { ascending: false });
+    let query = supabase.from('marketing_plans').select('*').order('updated_at', { ascending: false });
+    if (profile.role === 'agent') {
+      query = query.eq('agent', userId);
+    }
+    const { data, error } = await query;
 
       if (error) throw new Error(`Failed to load marketing plans: ${error.message}`);
 
@@ -237,15 +237,15 @@ export function ProgressReportPage() {
       setMarketingPlans(plans);
       if (plans.length > 0 && !selectedPlan) {
         setSelectedPlan(plans[0]);
-        await fetchActualProgress(agentId, plans[0]);
+        await fetchActualProgress(userId, plans[0]);
       } else if (!plans.length) {
         setSelectedPlan(null);
       }
-      await fetchPlanProgresses(agentId);
+      await fetchPlanProgresses(userId);
     } catch (err) {
       setError((err as Error).message);
     }
-  }, [selectedPlan]);
+  }, [profile,selectedPlan]);
 
   const fetchActualProgress = useCallback(async (agentId: string, plan: MarketingPlan) => {
   try {
@@ -960,7 +960,7 @@ export function ProgressReportPage() {
       return;
     }
 
-    if (profile.role !== 'agent') {
+    if (profile.role !== 'agent' && profile.role !== 'admin') {
       setError('You must be an agent to view this page.');
       setLoading(false);
       navigate('/agent-login');

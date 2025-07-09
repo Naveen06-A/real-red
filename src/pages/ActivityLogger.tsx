@@ -8,7 +8,7 @@ import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ErrorBoundary } from 'react-error-boundary';
 import { toast } from 'react-toastify';
 
-// Define interfaces for type safety
+// Define interfaces (unchanged)
 interface DoorKnockStreet {
   id: string;
   name: string;
@@ -370,16 +370,22 @@ export function ActivityLogger() {
 
   const dashboardPath = profile?.role === 'admin' ? '/admin-dashboard' : '/agent-dashboard';
 
-  const loadMarketingPlans = async (agentId: string) => {
+  const loadMarketingPlans = async (userId: string) => {
     if (isLoadingPlans) return;
     setIsLoadingPlans(true);
     try {
       setError(null);
-      const { data, error } = await supabase
+      let query = supabase
         .from('marketing_plans')
         .select('id, agent, suburb, start_date, end_date, door_knock_streets, phone_call_streets')
-        .eq('agent', agentId)
         .order('updated_at', { ascending: false });
+
+      if (profile?.role === 'agent') {
+        query = query.eq('agent', userId);
+      }
+      // For admins, fetch all plans (no agent filter)
+
+      const { data, error } = await query;
 
       if (error) {
         throw new Error(`Failed to fetch marketing plans: ${error.message}`);
@@ -544,36 +550,34 @@ export function ActivityLogger() {
       toast.error('Please fix the errors in the activity form before submitting.');
       return;
     }
-  
+
     if (!user?.id) {
       toast.error('User not authenticated. Please log in.');
       navigate('/agent-login');
       return;
     }
-  
+
     if (activityLog.submitting) {
       toast.error('Submission in progress. Please wait.');
       return;
     }
-  
+
     setActivityLog({ ...activityLog, submitting: true });
-  
+
     try {
-      // Debug: Fetch the authenticated user's ID from Supabase
       const { data: { user: supabaseUser }, error: authError } = await supabase.auth.getUser();
       if (authError || !supabaseUser) {
         throw new Error('Failed to verify authenticated user: ' + (authError?.message || 'No user found'));
       }
-  
-      // Debug: Compare user.id with supabaseUser.id
+
       console.log('User ID from useAuthStore:', user.id);
       console.log('Authenticated User ID from Supabase:', supabaseUser.id);
       if (user.id !== supabaseUser.id) {
         throw new Error('Mismatch between useAuthStore user ID and Supabase authenticated user ID');
       }
-  
+
       const activity = {
-        agent_id: user.id, // Ensure this matches auth.uid()
+        agent_id: user.id, // Use the authenticated user's ID
         activity_type: activityLog.type,
         activity_date: new Date(activityLog.date).toISOString(),
         street_name: capitalizeFirstLetter(activityLog.street_name.trim()),
@@ -593,12 +597,11 @@ export function ActivityLogger() {
           face_to_face_appraisals: parseInt(activityLog.face_to_face_appraisals || '0'),
         }),
       };
-  
-      // Debug: Log the activity object being inserted
+
       console.log('Inserting activity:', activity);
-  
+
       const { error: activityError } = await supabase.from('agent_activities').insert([activity]);
-  
+
       if (activityError) {
         console.error('Supabase insert error:', activityError);
         if (activityError.message.includes('violates row-level security policy')) {
@@ -606,7 +609,7 @@ export function ActivityLogger() {
         }
         throw new Error(`Failed to log activity: ${activityError.message}`);
       }
-  
+
       const selectedPlan = marketingPlans.find((plan) => plan.id === selectedPlanId);
       if (selectedPlan && !isCustomStreet) {
         let updatedStreets: PhoneCallStreet[] | DoorKnockStreet[];
@@ -617,11 +620,11 @@ export function ActivityLogger() {
                   ...street,
                   desktop_appraisals: String(
                     parseInt(street.desktop_appraisals || '0') +
-                      parseInt(activityLog.desktop_appraisals || '0')
+                    parseInt(activityLog.desktop_appraisals || '0')
                   ),
                   face_to_face_appraisals: String(
                     parseInt(street.face_to_face_appraisals || '0') +
-                      parseInt(activityLog.face_to_face_appraisals || '0')
+                    parseInt(activityLog.face_to_face_appraisals || '0')
                   ),
                 }
               : street
@@ -633,22 +636,22 @@ export function ActivityLogger() {
                   ...street,
                   desktop_appraisals: String(
                     parseInt(street.desktop_appraisals || '0') +
-                      parseInt(activityLog.desktop_appraisals || '0')
+                    parseInt(activityLog.desktop_appraisals || '0')
                   ),
                   face_to_face_appraisals: String(
                     parseInt(street.face_to_face_appraisals || '0') +
-                      parseInt(activityLog.face_to_face_appraisals || '0')
+                    parseInt(activityLog.face_to_face_appraisals || '0')
                   ),
                 }
               : street
           );
         }
-  
+
         const updateData =
           activityLog.type === 'phone_call'
             ? { phone_call_streets: updatedStreets }
             : { door_knock_streets: updatedStreets };
-  
+
         const { error: updateError } = await supabase
           .from('marketing_plans')
           .update({
@@ -656,12 +659,12 @@ export function ActivityLogger() {
             updated_at: new Date().toISOString(),
           })
           .eq('id', selectedPlan.id);
-  
+
         if (updateError) {
           console.error('Supabase update error:', updateError);
           throw new Error(`Failed to update marketing plan: ${updateError.message}`);
         }
-  
+
         setMarketingPlans((prev) =>
           prev.map((plan) =>
             plan.id === selectedPlan.id
@@ -674,7 +677,7 @@ export function ActivityLogger() {
           )
         );
       }
-  
+
       const submittedLog: ActivityLog = {
         type: activityLog.type,
         street_name: capitalizeFirstLetter(activityLog.street_name.trim()),
@@ -689,11 +692,11 @@ export function ActivityLogger() {
         notes: activityLog.notes.trim() || 'No notes provided',
         submitting: false,
       };
-  
+
       setSuccess(activityLog.type);
       setShowReport(true);
       toast.success('Activity logged successfully!');
-  
+
       setActivityLog({
         type: activityLog.type,
         street_name: 'Main Street',
@@ -710,7 +713,7 @@ export function ActivityLogger() {
       });
       setErrors({});
       setIsCustomStreet(true);
-  
+
       setActivityLog(submittedLog);
     } catch (err: any) {
       console.error('Error logging activity:', err);
@@ -785,7 +788,8 @@ export function ActivityLogger() {
     );
   }
 
-  if (!profile || profile.role !== 'agent') {
+  // Updated role check to allow both agent and admin
+  if (!profile || (profile.role !== 'agent' && profile.role !== 'admin')) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
@@ -797,7 +801,7 @@ export function ActivityLogger() {
             <svg className="w-16 h-16 mx-auto mb-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-xl font-semibold text-red-600">Access denied. Agents only.</p>
+            <p className="text-xl font-semibold text-red-600">Access denied. Agents or Admins only.</p>
             <motion.button
               onClick={() => navigate('/agent-login')}
               className="mt-4 px-6 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-full hover:from-indigo-700 hover:to-indigo-800 transition-all shadow-md"
@@ -851,7 +855,7 @@ export function ActivityLogger() {
           setShowReport(false);
           setSuccess(null);
         }}
-        onDashboard={() => navigate('/agent-dashboard')}
+        onDashboard={() => navigate(dashboardPath)}
         onProgressReport={() => navigate('/progress-report')}
       />
     );

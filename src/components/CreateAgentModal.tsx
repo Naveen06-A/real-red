@@ -31,7 +31,7 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
   });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ id: string; email: string; name: string; phone: string; password: string } | null>(null);
-  const [isLoading, setIsLoading] = useState(false); // Added isLoading state
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleCreateAgent = useCallback(async () => {
     try {
@@ -58,6 +58,7 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
 
       // Check admin authorization
       if (!profile || profile.role !== 'admin') {
+        console.error('Admin authorization failed:', { profile });
         throw new Error('Only admins can create new agent accounts');
       }
 
@@ -223,6 +224,7 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
   };
 
   const handleClose = () => {
+    console.log('handleClose called, resetting agentDetails and closing modal');
     setAgentDetails({ email: '', name: '', phone: '', password: '', confirmPassword: '' });
     setSuccess(null);
     setError(null);
@@ -231,11 +233,11 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
   };
 
   if (!isOpen) {
-    console.log('CreateAgentModal is not open');
+    console.log('CreateAgentModal is not open, isOpen:', isOpen);
     return null;
   }
 
-  console.log('Rendering CreateAgentModal');
+  console.log('Rendering CreateAgentModal, isOpen:', isOpen);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
@@ -340,10 +342,11 @@ export function CreateAgentModal({ isOpen, onClose, fetchAgents, fetchProperties
               </div>
               <button
                 onClick={handleClose}
-                className="w-full mt-2 py-2 text-gray-600 rounded-md hover:bg-gray-100"
-                aria-label="Close"
+                disabled={isLoading}
+                className="px-4 py-2 text-gray-600 rounded-md hover:bg-gray-100"
+                aria-label="Cancel"
               >
-                Close
+                Cancel
               </button>
             </motion.div>
           ) : (
