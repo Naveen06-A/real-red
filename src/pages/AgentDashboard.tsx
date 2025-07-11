@@ -998,6 +998,12 @@ export function AgentDashboard() {
           <PlusCircle className="w-8 h-8 mb-2" />
           <h2 className="text-xl font-semibold text-center">Add Property</h2>
         </Link>
+
+        <Link to="/agent-business-plan" className="bg-blue-600 text-white p-6 rounded-lg hover:bg-blue-700 transition flex flex-col items-center justify-center">
+          <PlusCircle className="w-8 h-8 mb-2" />
+          <h2 className="text-xl font-semibold text-center">Business Plan</h2>
+        
+        </Link>
         <Link to="/marketing-plan" className="bg-purple-600 text-white p-6 rounded-lg hover:bg-purple-700 transition flex flex-col items-center justify-center">
           <FileText className="w-8 h-8 mb-2" />
           <h2 className="text-xl font-semibold text-center">Marketing Plan</h2>

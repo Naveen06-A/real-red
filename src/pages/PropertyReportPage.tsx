@@ -1,4 +1,3 @@
-
 import {
   ArcElement,
   BarElement,
@@ -123,14 +122,20 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: [],
     agents: [],
     agency_names: [],
+    propertyTypes: [],
+    categories: [],
   });
-  const [localManualInputs, setLocalManualInputs] = useState(manualInputs || {
+
+  const [localManualInputs, setLocalManualInputs] = useState({
     suburbs: '',
     streetNames: '',
     streetNumbers: '',
     agents: '',
     agency_names: '',
+    propertyTypes: '',
+    categories: '',
   });
+
   const [localFilterPreviewCount, setLocalFilterPreviewCount] = useState(filterPreviewCount || 0);
   const [localCurrentPage, setLocalCurrentPage] = useState(currentPage || 1);
   const [exportLoading, setExportLoading] = useState(false);
@@ -142,6 +147,8 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: false,
     agents: false,
     agency_names: false,
+    propertyTypes: false,
+    categories: false,
   });
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -154,6 +161,8 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     streetNumbers: filterSuggestions?.streetNumbers || [],
     agents: filterSuggestions?.agents || [],
     agency_names: filterSuggestions?.agency_names || [],
+    propertyTypes: filterSuggestions?.propertyTypes || [],
+    categories: ['Listed', 'Sold'],
   });
 
   const propertiesTableRef = useRef<HTMLDivElement>(null);
@@ -171,6 +180,11 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     if (filteredProperties.length === 0 && initialFilteredProperties.length > 0) {
       setFilteredProperties(initialFilteredProperties);
       setLocalFilterPreviewCount(initialFilteredProperties.length);
+      // Initialize propertyTypes suggestions from initial data
+      setDynamicFilterSuggestions((prev) => ({
+        ...prev,
+        propertyTypes: [...new Set(initialFilteredProperties.map((prop: PropertyDetails) => prop?.property_type || '').filter(Boolean))] || [],
+      }));
     }
   }, [initialFilteredProperties]);
 
@@ -181,6 +195,10 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   useEffect(() => {
     console.log('localFilters updated:', localFilters);
   }, [localFilters]);
+
+  useEffect(() => {
+    console.log('dynamicFilterSuggestions updated:', dynamicFilterSuggestions);
+  }, [dynamicFilterSuggestions]);
 
   useEffect(() => {
     const subscription = supabase
@@ -225,13 +243,18 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
 
       const newSuggestions = {
         suburbs: filterSuggestions?.suburbs || [],
-        streetNames: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_name || '').filter(Boolean))],
-        streetNumbers: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_number || '').filter(Boolean))],
-        agents: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agent_name || '').filter(Boolean))],
-        agency_names: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agency_name || 'Unknown').filter(Boolean))],
+        streetNames: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_name || '').filter(Boolean))] || [],
+        streetNumbers: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.street_number || '').filter(Boolean))] || [],
+        agents: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agent_name || '').filter(Boolean))] || [],
+        agency_names: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.agency_name || 'Unknown').filter(Boolean))] || [],
+        propertyTypes: [...new Set(baseProperties.map((prop: PropertyDetails) => prop?.property_type || '').filter(Boolean))] || [],
+        categories: ['Listed', 'Sold'],
       };
 
+      console.log('New filter suggestions:', newSuggestions);
+
       setDynamicFilterSuggestions(newSuggestions);
+      categories: [...new Set(availableCategories.filter(Boolean).map(c => c.trim()))], // Only include valid, trimmed categories from data
 
       setLocalFilters((prev: Filters) => ({
         ...prev,
@@ -239,6 +262,8 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         streetNumbers: prev.streetNumbers.filter((num) => newSuggestions.streetNumbers.includes(num)),
         agents: prev.agents.filter((agent) => newSuggestions.agents.includes(agent)),
         agency_names: prev.agency_names.filter((agency) => newSuggestions.agency_names.includes(agency)),
+        propertyTypes: prev.propertyTypes.filter((type) => newSuggestions.propertyTypes.includes(type)),
+        categories: prev.categories.filter((category) => newSuggestions.categories.includes(category)),
       }));
     } catch (err) {
       console.error('Error updating filter suggestions:', err, { selectedSuburbs, filteredProperties });
@@ -374,6 +399,11 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
     try {
       console.log('Applying filters:', newFilters);
       console.log('Properties count before filtering:', properties.length);
+      // Validate input properties
+      if (!Array.isArray(properties)) {
+        console.error('Invalid properties array:', properties);
+        throw new Error('Properties data is not an array');
+      }
       const filtered = properties.filter((prop: PropertyDetails) => {
         if (!prop || typeof prop !== 'object') {
           console.warn('Invalid property encountered:', prop);
@@ -395,8 +425,31 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         const agencyMatch =
           newFilters.agency_names.length === 0 ||
           newFilters.agency_names.some((agency: string) => (prop.agency_name || 'Unknown').toLowerCase() === agency.toLowerCase());
+        const propertyTypeMatch =
+          newFilters.propertyTypes.length === 0 ||
+          newFilters.propertyTypes.some((type: string) => (prop.property_type || '').toLowerCase() === type.toLowerCase());
+        const categoryMatch =
+          newFilters.categories.length === 0 ||
+          newFilters.categories.some((category: string) => {
+            const propCategory = (prop.category || '').toLowerCase().trim();
+            const filterCategory = category.toLowerCase().trim();
+            if (!propCategory) {
+              console.warn('Empty or invalid category for property:', { id: prop.id, property: prop });
+              return false;
+            }
+            // Log mismatches for debugging
+            if (propCategory !== filterCategory) {
+              console.log('Category mismatch:', {
+                propertyId: prop.id,
+                propertyIndex: index,
+                propertyCategory: propCategory,
+                filterCategory: filterCategory,
+              });
+            }
+            return propCategory === filterCategory;
+          });
 
-        return suburbMatch && streetNameMatch && streetNumberMatch && agentMatch && agencyMatch;
+        return suburbMatch && streetNameMatch && streetNumberMatch && agentMatch && agencyMatch && propertyTypeMatch && categoryMatch;
       });
       console.log('Filtered properties count:', filtered.length);
       setFilteredProperties(filtered);
@@ -441,7 +494,7 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
   ) => {
     if (e.key === 'Enter') {
       const value = localManualInputs[filterType].trim();
-      if (value && dynamicFilterSuggestions[filterType]?.includes(value)) {
+      if (value && (dynamicFilterSuggestions[filterType] || []).includes(value)) {
         console.log(`Adding manual input for ${filterType}: ${value}`);
         setLocalFilters((prev: Filters) => {
           const newValues = [...new Set([...prev[filterType], value])];
@@ -454,20 +507,44 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           return newFilters;
         });
         setLocalManualInputs((prev) => ({ ...prev, [filterType]: '' }));
-        toast.success(`Added ${filterType.replace(/s$/, '')}: ${value}`);
+        toast.success(`Added ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status' : filterType.replace(/s$/, '')}: ${value}`);
       } else {
-        toast.error(`Invalid ${filterType.replace(/s$/, '')}. Please select from suggestions.`);
+        toast.error(`Invalid ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status' : filterType.replace(/s$/, '')}. Please select from suggestions.`);
       }
     }
   };
 
   const resetFilters = () => {
     try {
-      const emptyFilters: Filters = { suburbs: [], streetNames: [], streetNumbers: [], agents: [], agency_names: [] };
+      const emptyFilters: Filters = {
+        suburbs: [],
+        streetNames: [],
+        streetNumbers: [],
+        agents: [],
+        agency_names: [],
+        propertyTypes: [],
+        categories: [],
+      };
       console.log('Resetting filters');
       setLocalFilters(emptyFilters);
-      setLocalManualInputs({ suburbs: '', streetNames: '', streetNumbers: '', agents: '', agency_names: '' });
-      setExpandedFilters({ suburbs: false, streetNames: false, streetNumbers: false, agents: false });
+      setLocalManualInputs({
+        suburbs: '',
+        streetNames: '',
+        streetNumbers: '',
+        agents: '',
+        agency_names: '',
+        propertyTypes: '',
+        categories: '',
+      });
+      setExpandedFilters({
+        suburbs: false,
+        streetNames: false,
+        streetNumbers: false,
+        agents: false,
+        agency_names: false,
+        propertyTypes: false,
+        categories: false,
+      });
       setFilteredProperties(initialFilteredProperties);
       setLocalFilterPreviewCount(initialFilteredProperties.length);
       setDynamicFilterSuggestions({
@@ -476,6 +553,9 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
         streetNumbers: filterSuggestions?.streetNumbers || [],
         agents: filterSuggestions?.agents || [],
         agency_names: filterSuggestions?.agency_names || [],
+        propertyTypes: [...new Set(initialFilteredProperties.map((prop: PropertyDetails) => prop?.property_type || '').filter(Boolean))] || [],
+        categories: ['Listed', 'Sold'],
+        
       });
       localStorage.removeItem('reportFilters');
       toast.success('Filters reset successfully');
@@ -1123,27 +1203,19 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
           <p className="text-sm text-gray-500 mb-4">
             Matching properties: <span className="font-semibold text-blue-600">{localFilterPreviewCount}</span>
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            {(['suburbs', 'streetNames', 'streetNumbers', 'agents', 'agency_names'] as const).map((filterType) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
+            {(['suburbs', 'streetNames', 'streetNumbers', 'agents', 'agency_names', 'propertyTypes', 'categories'] as const).map((filterType) => (
               <motion.div
                 key={filterType}
                 className="border border-blue-200 rounded-xl bg-white shadow-sm hover:shadow-md transition-all duration-200"
-                title={`Filter by ${filterType === 'agency_names' ? 'agency name' : filterType.replace(/s$/, '')}`}
+                title={`Filter by ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status' : filterType.replace(/s$/, '')}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
                 <motion.button
                   onClick={() => toggleFilterSection(filterType)}
-                  className={`w-full flex justify-between items-center p-4 font-medium rounded-t-xl ${
-                    {
-                      suburbs: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
-                      streetNames: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
-                      streetNumbers: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
-                      agents: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
-                      agency_names: 'bg-blue-50 text-blue-800 hover:bg-blue-100',
-                    }[filterType]
-                  } transition-colors`}
+                  className={`w-full flex justify-between items-center p-4 font-medium rounded-t-xl bg-blue-50 text-blue-800 hover:bg-blue-100 transition-colors`}
                   whileHover={{ scale: 1.02 }}
                   aria-expanded={expandedFilters[filterType]}
                   aria-controls={`filter-${filterType}`}
@@ -1151,6 +1223,10 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                   <span>
                     {filterType === 'agency_names'
                       ? 'Agency Name'
+                      : filterType === 'propertyTypes'
+                      ? 'Property Type'
+                      : filterType === 'categories'
+                      ? 'Status'
                       : filterType.charAt(0).toUpperCase() + filterType.slice(1).replace(/s$/, '')}
                   </span>
                   <ChevronDown
@@ -1166,29 +1242,30 @@ export function PropertyReportPage(props: PropertyReportPageProps) {
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.3 }}
                   >
+                    {console.log(`Filter suggestions for ${filterType}:`, dynamicFilterSuggestions[filterType])}
                     <input
                       type="text"
-                      value={localManualInputs[filterType]}
+                      value={localManualInputs[filterType] || ''}
                       onChange={(e) => handleManualInputChange(filterType, e.target.value)}
                       onKeyDown={(e) => handleManualInputKeyDown(filterType, e)}
-                      placeholder={`Enter ${filterType === 'agency_names' ? 'agency name' : filterType.replace(/s$/, '')} and press Enter`}
+                      placeholder={`Enter ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status (Listed/Sold)' : filterType.replace(/s$/, '')} and press Enter`}
                       className="w-full p-3 mb-3 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all bg-blue-50"
-                      aria-label={`Enter ${filterType.replace(/s$/, '')}`}
+                      aria-label={`Enter ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status' : filterType.replace(/s$/, '')}`}
                     />
                     <Select
                       isMulti
-                      options={dynamicFilterSuggestions[filterType]?.map((item: string) => ({
+                      options={(dynamicFilterSuggestions[filterType] || []).map((item: string) => ({
                         value: item,
                         label: item,
-                      })) || []}
-                      value={localFilters[filterType].map((item: string) => ({ value: item, label: item }))}
+                      }))}
+                      value={(localFilters[filterType] || []).map((item: string) => ({ value: item, label: item }))}
                       onChange={(selected) => handleFilterChange(filterType, selected)}
-                      placeholder={`Select ${filterType === 'agency_names' ? 'agency name' : filterType.replace(/s$/, '')}...`}
+                      placeholder={`Select ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status' : filterType.replace(/s$/, '')}...`}
                       styles={selectStyles}
                       noOptionsMessage={() => 'No options available'}
                       className="basic-multi-select"
                       classNamePrefix="select"
-                      aria-label={`Select ${filterType.replace(/s$/, '')}`}
+                      aria-label={`Select ${filterType === 'agency_names' ? 'agency name' : filterType === 'propertyTypes' ? 'property type' : filterType === 'categories' ? 'status' : filterType.replace(/s$/, '')}`}
                     />
                   </motion.div>
                 )}

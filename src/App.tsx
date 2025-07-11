@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Component, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -7,11 +7,11 @@ import { PropertyForm } from './pages/PropertyForm';
 import { PropertyList } from './pages/PropertyList';
 import { PropertyDetail } from './pages/PropertyDetail';
 import { Navigation } from './components/Navigation';
-import  {CreateAgentModal}  from './components/CreateAgentModal';
+import { CreateAgentModal } from './components/CreateAgentModal';
 import { AgentLogin } from './pages/AgentLogin';
 import { AgentDashboard } from './pages/AgentDashboard';
 import { Reports } from './pages/Reports';
-import {AgentReports}  from './pages/AgentReports';
+import { AgentReports } from './pages/AgentReports';
 import { AgentRegister } from './pages/AgentRegister';
 import { useAuthStore } from './store/authStore';
 import { PropertyPrediction } from './pages/PropertyPrediction';
@@ -22,15 +22,46 @@ import { PhoneCalls } from './pages/PhoneCalls';
 import { ActivityLogger } from './pages/ActivityLogger';
 import { ResetPassword } from './components/ResetPassword';
 import { ProgressReportPage } from './pages/ProgressReportPage';
-import { LoadingOverlay } from './components/LoadingOverlay';
-import {PropertyReportPage}  from './pages/PropertyReportPage';
-import CommissionByAgency  from './pages/CommissionByAgency';
-import Comparisons  from './pages/Comparisons';
-import AdminCommissionByAgency  from './pages/AdminCommissionByAgency';
+import { PropertyReportPage } from './pages/PropertyReportPage';
+import  CommissionByAgency  from './pages/CommissionByAgency';
+import  Comparisons  from './pages/Comparisons';
+import  AdminCommissionByAgency  from './pages/AdminCommissionByAgency';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AgentManagement } from './pages/AgentManagement';
-// import { EditModal as PropertyReportPage } from './pages/PropertyReportPage';
+import AgentBusinessPlan from './pages/AgentBusinessPlan'; // Updated import (assuming default export)
+import {AgentProfilePage} from './pages/AgentProfilePage';
+import {AgentExpensesPage} from './pages/AgentExpensesPage';
+
+import { LoadingOverlay } from './components/LoadingOverlay';
+
+// Error Boundary to catch import or runtime errors
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: any }> {
+  state = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="max-w-7xl mx-auto p-6 text-center">
+          <h1 className="text-3xl font-bold text-red-600">Something Went Wrong</h1>
+          <p className="text-gray-600 mt-4">{this.state.error?.toString() || 'An unexpected error occurred.'}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // PrivateRoute for general authenticated users
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
@@ -56,6 +87,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return profile?.role === 'admin' ? <>{children}</> : <Navigate to="/admin-login" replace />;
 }
 
+// RouteChangeTracker for loading overlay during route changes
 function RouteChangeTracker() {
   const location = useLocation();
   const [isRouteLoading, setIsRouteLoading] = useState(false);
@@ -63,17 +95,57 @@ function RouteChangeTracker() {
   useEffect(() => {
     console.log('Route changed to:', location.pathname);
     setIsRouteLoading(true);
-    const timer = setTimeout(() => setIsRouteLoading(false), 1000);
+    const timer = setTimeout(() => setIsRouteLoading(false), 500); // Reduced timeout for smoother UX
     return () => clearTimeout(timer);
   }, [location.pathname]);
 
   return isRouteLoading ? <LoadingOverlay message="Loading page..." /> : null;
 }
 
+// Centralized route definitions
+const routes = [
+  { path: '/', element: <Home /> },
+  { path: '/agent-login', element: <AgentLogin /> },
+  { path: '/reset-password', element: <ResetPassword /> },
+  { path: '/agent-register', element: <AgentRegister /> },
+  { path: '/admin-login', element: <AdminLogin /> },
+  { path: '/admin', element: <AdminRoute><AdminDashboard /></AdminRoute> },
+  { path: '/admin-commission', element: <AdminRoute><AdminCommissionByAgency /></AdminRoute> },
+  { path: '/progress-report', element: <ProgressReportPage /> },
+  { path: '/admin-dashboard', element: <AdminRoute><AdminDashboard /></AdminRoute> },
+  { path: '/agent-dashboard', element: <AgentRoute><AgentDashboard /></AgentRoute> },
+  { path: '/agent-management', element: <AgentRoute><AgentManagement /></AgentRoute> },
+  { path: '/agent-business-plan', element: <AgentRoute><AgentBusinessPlan /></AgentRoute> }, // Updated path
+  { path: '/agent-profile', element: <AgentRoute><AgentProfilePage /></AgentRoute> },
+  { path: '/agent-reports', element: <AgentReports /> },
+  { path: '/agent-dashboard/door-knocks', element: <AgentRoute><DoorKnocks /></AgentRoute> },
+  {path: '/agent-expenses', element: <AgentRoute><AgentExpensesPage /></AgentRoute>},
+  { path: '/agent-dashboard/phone-calls', element: <AgentRoute><PhoneCalls /></AgentRoute> },
+  { path: '/marketing-plan', element: <MarketingPlanPage /> },
+  { path: '/property-report-page', element: <PropertyReportPage /> },
+  { path: '/create-agent-modal', element: <AdminRoute><CreateAgentModal /></AdminRoute> },
+  { path: '/progress-report-page', element: <AgentRoute><ProgressReportPage /></AgentRoute> },
+  { path: '/activity-logger', element: <AgentRoute><ActivityLogger /></AgentRoute> },
+  { path: '/reports', element: <AgentRoute><Reports /></AgentRoute> },
+  { path: '/agent-properties', element: <PropertyList /> },
+  { path: '/property-detail/:id', element: <PropertyDetail /> },
+  { path: '/market-reports', element: <PrivateRoute><MarketReports /></PrivateRoute> },
+  { path: '/property-prediction/:id', element: <PrivateRoute><PropertyPrediction /></PrivateRoute> },
+  { path: '/property-form', element: <PropertyForm /> },
+  { path: '/comparisons', element: <AgentRoute><Comparisons /></AgentRoute> },
+  {
+    path: '/commission-by-agency',
+    element: (
+      <AgentRoute>
+        <CommissionByAgency commissionByAgency={null} properties={null} />
+      </AgentRoute>
+    ),
+  },
+  { path: '*', element: <div className="text-center py-12 text-gray-600">404 - Page Not Found</div> }, // 404 route
+];
+
 function App() {
   const { initializeAuth, loading: authLoading } = useAuthStore();
-  
-  const [appLoading, setAppLoading] = useState(true);
 
   useEffect(() => {
     console.log('Starting app initialization');
@@ -87,7 +159,9 @@ function App() {
       } catch (err) {
         console.error('Auth initialization failed:', err);
       } finally {
-        if (isMounted) setAppLoading(false);
+        if (isMounted) {
+          console.log('App initialization complete');
+        }
       }
     };
 
@@ -99,57 +173,33 @@ function App() {
     };
   }, [initializeAuth]);
 
-  console.log('App render - authLoading:', authLoading, 'appLoading:', appLoading);
-
-  if (appLoading || authLoading) {
+  if (authLoading) {
     return <LoadingOverlay message="Loading your experience..." />;
   }
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50 transition-all">
-        <Navigation />
-        <RouteChangeTracker />
-        <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} closeOnClick draggable pauseOnHover />
-        <main className="container mx-auto px-4 py-8 animate-fade-in">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/agent-login" element={<AgentLogin />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/agent-register" element={<AgentRegister />} />
-            <Route path="/admin-login" element={<AdminLogin />} />
-            <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-            <Route path="/admin-commission" element={<AdminRoute><AdminCommissionByAgency /></AdminRoute>} />
-            <Route path="/progress-report" element={<ProgressReportPage />} />
-            <Route path="/admin-dashboard" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-            <Route path="/agent-dashboard" element={<AgentRoute><AgentDashboard /></AgentRoute>} />
-            <Route path="/agent-management" element={<AgentRoute><AgentManagement /></AgentRoute>} />
-            <Route path="/agent-reports" element={<AgentReports />} />
-            <Route path="/agent-dashboard/door-knocks" element={<AgentRoute><DoorKnocks /></AgentRoute>} />
-            <Route path="/agent-dashboard/phone-calls" element={<AgentRoute><PhoneCalls /></AgentRoute>} />
-            <Route path="/marketing-plan" element={<MarketingPlanPage />} />
-            <Route path="/property-report-page" element={<PropertyReportPage />} />
-            <Route path="/create-agent-modal" element={<AdminRoute><CreateAgentModal /></AdminRoute>} />
-            <Route path="/progress-report-page" element={<AgentRoute><ProgressReportPage /></AgentRoute>} />
-            <Route path="/activity-logger" element={<AgentRoute><ActivityLogger /></AgentRoute>} />
-            <Route path="/reports" element={<AgentRoute><Reports /></AgentRoute>} />
-            <Route path="/agent-properties" element={<PropertyList />} />
-            <Route path="/property-detail/:id" element={<PropertyDetail />} />
-            <Route path="/market-reports" element={<PrivateRoute><MarketReports /></PrivateRoute>} />
-            <Route path="/property-prediction/:id" element={<PrivateRoute><PropertyPrediction /></PrivateRoute>} />
-            <Route path="/property-form" element={<PropertyForm />} />
-            <Route path="/comparisons" element={<AgentRoute><Comparisons /></AgentRoute>} />
-            <Route
-              path="/commission-by-agency"
-              element={
-                <AgentRoute>
-                  <CommissionByAgency commissionByAgency={{}} properties={[]} />
-                </AgentRoute>
-              }
-            />
-          </Routes>
-        </main>
-      </div>
+      <ErrorBoundary>
+        <div className="min-h-screen bg-gray-50 transition-all">
+          <Navigation />
+          <RouteChangeTracker />
+          <ToastContainer
+            position="top-right"
+            autoClose={3000}
+            hideProgressBar={false}
+            closeOnClick
+            draggable
+            pauseOnHover
+          />
+          <main className="container mx-auto px-4 py-8 animate-fade-in">
+            <Routes>
+              {routes.map(({ path, element }) => (
+                <Route key={path} path={path} element={element} />
+              ))}
+            </Routes>
+          </main>
+        </div>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }
